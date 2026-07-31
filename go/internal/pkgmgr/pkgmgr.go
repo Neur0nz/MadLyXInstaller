@@ -77,14 +77,29 @@ func ChocoInstall(ctx context.Context, r Runner, name string) error {
 // HebrewPackages are the LaTeX packages a Hebrew maths document needs.
 //
 // babel-hebrew and culmus are the Hebrew core; preview and dvipng back LyX's
-// instant preview; the rest are what the MadLyX templates and macros pull in.
+// instant preview; the middle group is what the MadLyX templates and macros
+// pull in.
+//
+// The last group is optional extras, commented out in the shipped preamble but
+// installed anyway so uncommenting a line just works. Every one of them was
+// compiled against a Hebrew document first - RTL handling conflicts with a
+// fair number of packages, and guessing is unreliable. algorithmicx is
+// deliberately absent: it is the one that failed.
 var HebrewPackages = []string{
+	// Hebrew core
 	"babel-hebrew", "hebrew-fonts", "culmus",
+	// LyX instant preview
 	"preview", "dvipng",
+	// used by the MadLyX templates and macros
 	"mathtools", "stmaryrd", "relsize", "cancel", "esint",
 	"mathdots", "mhchem", "undertilde", "stackrel",
 	"xcolor", "listings", "multicol", "hyperref", "atbegshi",
 	"amsmath", "amsfonts", "dsfont", "wasysym",
+	// optional extras, verified against Hebrew
+	"physics", "siunitx", "braket", "esdiff", "mathrsfs", "bbm",
+	"tcolorbox", "cleveref", "microtype", "enumitem",
+	"booktabs", "tabularx", "caption", "subcaption", "wrapfig",
+	"pgf", "pgfplots", "algorithm2e",
 }
 
 // InstallTeXPackages installs packages one at a time so a single unavailable

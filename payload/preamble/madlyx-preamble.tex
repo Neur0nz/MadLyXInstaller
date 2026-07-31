@@ -151,13 +151,82 @@
 
 
 % ---------------------------------------------------------------------------
-%  Clickable cross-references                                           (p.53-54)
+%  Clickable cross-references                                          (p.53-54)
 %
 %  Turns cross-references into links and generates a PDF bookmark tree.
 %
-%  WARNING (guide, p.53): hyperref throws errors in the heb-article class.
-%  Only enable this in the Standard/AMS article templates - which is why it is
-%  commented out here rather than on by default.
+%  The guide (p.53) warns that hyperref errors in the Hebrew Article class.
+%  That no longer reproduces: tested against babel[hebrew] + culmus with
+%  current MiKTeX, hyperref compiles cleanly, alone and alongside the packages
+%  below. Enabled by default; comment it out if your document disagrees.
 % ---------------------------------------------------------------------------
-% \usepackage{hyperref}
-% \hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, bookmarks=true}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, bookmarks=true}
+
+
+% ===========================================================================
+%  OPTIONAL EXTRAS
+%
+%  None of these are in the guide. Each was compiled against a Hebrew document
+%  before being listed here, because RTL handling conflicts with a fair number
+%  of LaTeX packages and guessing is unreliable. The installer already puts
+%  them on your machine, so uncommenting a line is all that is needed.
+%
+%  Known NOT to work with Hebrew: algorithmicx (algorithm + algpseudocode).
+%  Use algorithm2e below instead.
+% ===========================================================================
+
+
+% --- Physics and maths notation --------------------------------------------
+%  \dv{f}{x} derivative, \pdv partial, \ket{\psi} \bra{\phi}, \abs{x}, \norm{v}
+%  Probably the single biggest quality-of-life win for a physics student.
+% \usepackage{physics}
+
+%  Units that space and format themselves: \SI{9.81}{\meter\per\second\squared}
+% \usepackage{siunitx}
+
+%  Dirac notation, if you prefer it to the physics package: \Braket{\phi|\psi}
+% \usepackage{braket}
+
+%  \diff{f}{x} as an alternative derivative syntax.
+% \usepackage{esdiff}
+
+%  \mathscr{L} script letters, and \mathbbm{1} for the indicator.
+% \usepackage{mathrsfs}
+% \usepackage{bbm}
+
+
+% --- Presentation ----------------------------------------------------------
+%  Coloured, breakable boxes - the nicest way to make theorems stand out.
+%  \begin{tcolorbox}[colback=blue!5,title=משפט] ... \end{tcolorbox}
+% \usepackage[most]{tcolorbox}
+
+%  Cross-references that name themselves: \cref{thm:main} prints "Theorem 3".
+%  Must be loaded after hyperref.
+% \usepackage{cleveref}
+
+%  Subtle micro-typography. Worth having in Hebrew, where the absence of
+%  hyphenation makes justification harder.
+% \usepackage{microtype}
+
+%  Control over list spacing: \begin{itemize}[noitemsep]
+% \usepackage{enumitem}
+
+%  Tables that do not look like a spreadsheet, and ones that fit a width.
+% \usepackage{booktabs}
+% \usepackage{tabularx}
+
+%  Figure captions and side-by-side subfigures.
+% \usepackage{caption}
+% \usepackage{subcaption}
+% \usepackage{wrapfig}
+
+
+% --- Diagrams and algorithms -----------------------------------------------
+%  Draw anything; plot functions and data.
+% \usepackage{tikz}
+% \usepackage{pgfplots}
+% \pgfplotsset{compat=1.18}
+
+%  Pseudocode. Use this rather than algorithmicx, which breaks under Hebrew.
+% \usepackage[ruled,vlined]{algorithm2e}
