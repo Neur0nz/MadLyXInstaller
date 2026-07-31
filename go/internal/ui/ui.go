@@ -74,6 +74,16 @@ func New(assumeYes bool) *UI {
 	return u
 }
 
+// NewFor builds a UI with the terminal state supplied rather than detected, so
+// tests can exercise both modes without a real terminal.
+func NewFor(out io.Writer, mode Mode, canPrompt bool) *UI {
+	if mode == Plain {
+		pterm.DisableColor()
+		pterm.DisableStyling()
+	}
+	return &UI{mode: mode, canPrompt: canPrompt, out: out}
+}
+
 // CanPrompt reports whether asking the user a question can actually work.
 // Callers must consult this before doing anything that needs an answer -
 // notably elevation, where a UAC dialog with nobody present is worse than
