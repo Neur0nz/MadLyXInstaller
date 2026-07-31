@@ -83,7 +83,9 @@ Show-Banner
 #  machine-wide, and Defender exclusions - so we offer to restart elevated
 #  rather than either demanding it or silently skipping those steps.
 # ---------------------------------------------------------------------------
-if (-not (Test-IsAdmin) -and -not $NoElevate -and -not $Unattended -and $PSCommandPath) {
+# Test-CanPrompt matters here beyond politeness: without a live console, a UAC
+# dialog would appear with nobody there to accept it.
+if (-not (Test-IsAdmin) -and -not $NoElevate -and $PSCommandPath -and (Test-CanPrompt)) {
     $wantsElevation = Confirm-Action `
         -Question 'Restart with administrator rights?' `
         -Detail @'

@@ -166,9 +166,9 @@ function Initialize-LyXUserDir {
     }
 
     Write-Warn 'LyX did not create its settings folder automatically.'
-    if (-not $script:MadLyxUnattended) {
+    if (Test-CanPrompt) {
         Write-Host '    Please open LyX manually, then close it, and press Enter here.' -ForegroundColor White
-        Read-Host '    Press Enter when done' | Out-Null
+        try { Read-Host '    Press Enter when done' | Out-Null } catch { }
         $userDir = Find-LyXUserDir -LyX $LyX
     }
     return $userDir

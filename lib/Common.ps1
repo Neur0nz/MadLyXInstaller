@@ -1,6 +1,12 @@
 # Common.ps1 - logging, prompting, backups and small shared helpers.
 
-$script:MadLyxLogFile = $null
+# Initialised here rather than left to the caller. Everything runs under
+# Set-StrictMode -Version Latest, where reading a variable that was never
+# assigned is a terminating error - so a module dot-sourced on its own, or
+# ahead of install.ps1 setting these, would throw instead of using a default.
+$script:MadLyxLogFile    = $null
+$script:MadLyxUnattended = $false
+$script:MadLyxPromptWorks = $null
 
 function Initialize-MadLyxLog {
     param([string]$Path)
@@ -50,11 +56,35 @@ function Write-Err {
 }
 
 <#
+    Can we actually ask the user something?
+
+    False when -Unattended was passed, or when standard input is redirected -
+    a piped invocation, a CI job, or `irm | iex` run through anything other
+    than a live console. In those cases Read-Host returns $null rather than
+    blocking, and calling .Trim() on it throws.
+
+    The probe result is cached: the answer cannot change mid-run.
+#>
+function Test-CanPrompt {
+    if ($script:MadLyxUnattended) { return $false }
+    if ($null -ne $script:MadLyxPromptWorks) { return $script:MadLyxPromptWorks }
+    try {
+        $script:MadLyxPromptWorks = -not [Console]::IsInputRedirected
+    } catch {
+        $script:MadLyxPromptWorks = $false
+    }
+    if (-not $script:MadLyxPromptWorks) {
+        Write-Log 'stdin is redirected; questions will use their default answers'
+    }
+    return $script:MadLyxPromptWorks
+}
+
+<#
     Ask the user a yes/no question.
 
-    In -Unattended mode nothing is asked and $Default is returned, so the whole
+    Returns $Default without asking when prompting is impossible, so the whole
     installer stays scriptable. System-level changes pass -Default:$false so an
-    unattended run never silently edits the registry or Defender config.
+    unattended or piped run never silently edits the registry or Defender config.
 #>
 function Confirm-Action {
     param(
@@ -62,19 +92,35 @@ function Confirm-Action {
         [string]$Detail,
         [bool]$Default = $true
     )
-    if ($script:MadLyxUnattended) {
-        Write-Log "auto-answer '$Question' -> $Default (unattended)"
+    if (-not (Test-CanPrompt)) {
+        $shown = if ($Default) { 'yes' } else { 'no' }
+        Write-Log "auto-answer '$Question' -> $Default (cannot prompt)"
+        Write-Host "  ? $Question" -ForegroundColor White
+        Write-Host "    (not running interactively - using the default: $shown)" -ForegroundColor DarkGray
         return $Default
     }
+
     Write-Host ''
     Write-Host "  ? $Question" -ForegroundColor White
     if ($Detail) { foreach ($line in $Detail -split "`n") { Write-Host "    $line" -ForegroundColor DarkGray } }
     $hint = if ($Default) { '[Y/n]' } else { '[y/N]' }
+
     while ($true) {
-        $answer = (Read-Host "    $hint").Trim().ToLower()
-        if ($answer -eq '')                    { Write-Log "answered '$Question' -> default $Default"; return $Default }
-        if ($answer -in @('y','yes'))          { Write-Log "answered '$Question' -> yes"; return $true }
-        if ($answer -in @('n','no'))           { Write-Log "answered '$Question' -> no";  return $false }
+        $raw = $null
+        try { $raw = Read-Host "    $hint" } catch { $raw = $null }
+
+        # Read-Host yields $null when input ends (Ctrl+Z, closed pipe). Do not
+        # loop on it - that would spin forever - and never call .Trim() on it.
+        if ($null -eq $raw) {
+            Write-Log "input ended while asking '$Question'; using default $Default"
+            Write-Host "    (no more input - using the default)" -ForegroundColor DarkGray
+            return $Default
+        }
+
+        $answer = $raw.Trim().ToLower()
+        if ($answer -eq '')           { Write-Log "answered '$Question' -> default $Default"; return $Default }
+        if ($answer -in @('y','yes')) { Write-Log "answered '$Question' -> yes"; return $true }
+        if ($answer -in @('n','no'))  { Write-Log "answered '$Question' -> no";  return $false }
         Write-Host '    Please answer y or n.' -ForegroundColor DarkGray
     }
 }
