@@ -1,0 +1,16 @@
+# The payload is redistributed verbatim from Kali's originals. Treat it as
+# binary so git never rewrites line endings.
+#
+# Without this, core.autocrlf normalises CRLF to LF on commit. A Windows
+# checkout then restores CRLF, but a Linux CI runner does not - so the Go
+# binary built in CI embedded files 605 bytes smaller than the ones the
+# PowerShell installer ships, and neither matched what the author published.
+# Builds must be byte-identical wherever they run, and we must not silently
+# alter files we are redistributing.
+payload/** -text
+
+# Scripts stay LF in the repository; git restores CRLF on Windows checkout.
+*.ps1  text eol=crlf
+*.go   text eol=lf
+*.yml  text eol=lf
+*.md   text
