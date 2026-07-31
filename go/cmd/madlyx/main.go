@@ -97,7 +97,6 @@ func newContext(g globalFlags) (*step.Context, *logger, *ui.UI) {
 		UI:      u,
 		Log:     log,
 		DryRun:  g.dryRun,
-		State:   map[string]any{},
 		Verbose: g.verbose,
 	}
 	return ctx, log, u
@@ -236,11 +235,15 @@ func maybeElevate(g globalFlags, u *ui.UI) error {
 	if g.noElevate || g.dryRun || !u.CanPrompt() || isAdmin() {
 		return nil
 	}
+	// Say what declining costs. LyX's installer requests elevation from its own
+	// manifest, so Windows asks either way - the only choice is whether that
+	// happens now, expected, or several minutes in, as a surprise.
 	ok := u.Confirm("Restart with administrator rights?",
-		"Not required. Without it these are skipped:\n"+
-			"  - installing LyX for all users (a per-user install still works)\n"+
-			"  - Defender exclusions, which speed up compiling\n\n"+
-			"Everything else works without administrator rights.", true)
+		"Recommended. Windows will ask for permission during the LyX install either\n"+
+			"way, because LyX installs for all users - accepting now gets it over with\n"+
+			"instead of interrupting you part-way through.\n\n"+
+			"Declining is fine. You will simply see the Windows prompt later, at the\n"+
+			"LyX step, and Defender exclusions (which speed up compiling) are skipped.", true)
 	if !ok {
 		return nil
 	}

@@ -53,7 +53,7 @@ func TestSkipFlagsRemoveTheRightSteps(t *testing.T) {
 // there cannot abort an otherwise good install.
 func TestSystemStepsAreOptional(t *testing.T) {
 	for _, s := range Build(testOptions()).Steps {
-		if s.ID == "defender" || s.ID == "culmus" || s.ID == "smoketest" {
+		if s.ID == "defender" || s.ID == "culmus" || s.ID == "smoketest" || s.ID == "reconfigure" {
 			if !s.Optional {
 				t.Errorf("step %q should be Optional", s.ID)
 			}

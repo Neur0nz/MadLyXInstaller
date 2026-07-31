@@ -20,10 +20,11 @@ import (
 // files per run, and MiKTeX writes thousands when installing packages.
 func defenderExclusions() *step.Step {
 	return &step.Step{
-		ID:       "defender",
-		Name:     "Defender exclusions",
-		Needs:    []string{"tex"},
-		Optional: true,
+		ID:          "defender",
+		Name:        "Defender exclusions",
+		Needs:       []string{"tex"},
+		Optional:    true,
+		Interactive: true, // asks before changing Defender configuration
 		Check: func(c *step.Context) (step.State, error) {
 			t, ok := step.Get[winenv.TeX](c, keyTeX)
 			if !ok {
@@ -82,6 +83,40 @@ func texRoot(t winenv.TeX) string {
 	return filepath.Dir(filepath.Dir(filepath.Dir(t.BinDir)))
 }
 
+// reconfigure makes LyX rescan TeX after the packages are in place.
+//
+// It has to come after both the LyX install and the package install, which the
+// Needs below express - and because those two run concurrently, this is the
+// step that joins them back together.
+func reconfigure() *step.Step {
+	return &step.Step{
+		ID:       "reconfigure",
+		Name:     "Rescanning TeX from LyX",
+		Needs:    []string{"userdir", "texpackages"},
+		Optional: true,
+		Check: func(c *step.Context) (step.State, error) {
+			dir, ok := step.Get[string](c, keyUserDir)
+			if !ok {
+				return step.Unknown, nil
+			}
+			// heb-article is the class the MadLyX templates use, so it is the
+			// one whose availability actually matters.
+			if textclassAvailable(dir, "heb-article") {
+				return step.Satisfied, nil
+			}
+			return step.Pending, nil
+		},
+		Apply: func(c *step.Context) error {
+			l, ok := step.Get[winenv.LyX](c, keyLyX)
+			if !ok {
+				return fmt.Errorf("no LyX recorded")
+			}
+			c.UI.Detail("this takes a couple of minutes")
+			return reconfigureLyX(c, l)
+		},
+	}
+}
+
 // smokeTest is the only check that proves the whole chain works: LyX, the TeX
 // distribution, babel-hebrew and culmus all have to cooperate to turn a Hebrew
 // document into a PDF.
@@ -89,7 +124,7 @@ func smokeTest() *step.Step {
 	return &step.Step{
 		ID:       "smoketest",
 		Name:     "Hebrew test compile",
-		Needs:    []string{"settings"},
+		Needs:    []string{"settings", "reconfigure"},
 		Optional: true,
 		Check: func(c *step.Context) (step.State, error) {
 			// Always worth running: it verifies rather than configures.
@@ -119,6 +154,9 @@ func smokeTest() *step.Step {
 			defer cancel()
 
 			cmd := exec.CommandContext(ctx, l.Exe, "-E", "pdf2", out, src)
+			// Keep LyX's warnings and pdflatex's output out of the user's
+			// terminal; they go to the log instead.
+			hideConsole(cmd)
 			combined, runErr := cmd.CombinedOutput()
 			c.Log.Logf("smoke test output: %s", string(combined))
 

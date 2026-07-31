@@ -14,13 +14,13 @@ func TestPlainModeEmitsNoRedraws(t *testing.T) {
 	u := NewFor(&buf, Plain, false)
 
 	u.Section("Installing MiKTeX")
-	u.Step("downloading")
+	u.Begin("downloading")
 	for i := 1; i <= 5; i++ {
 		u.Progress("package", i, 5)
 	}
-	u.Done("installed")
+	u.End("downloading", true, "installed")
 	u.Warn("not elevated")
-	u.Fail("culmus.sty not found")
+	u.End("", false, "culmus.sty not found")
 
 	out := buf.String()
 	if strings.Contains(out, "\r") {
@@ -36,7 +36,7 @@ func TestPlainModeEmitsNoRedraws(t *testing.T) {
 func TestPlainModeKeepsEveryProgressLine(t *testing.T) {
 	var buf bytes.Buffer
 	u := NewFor(&buf, Plain, false)
-	u.Step("packages")
+	u.Begin("packages")
 	for i := 1; i <= 24; i++ {
 		u.Progress("pkg", i, 24)
 	}
@@ -94,11 +94,11 @@ func TestSummaryRendersInPlainMode(t *testing.T) {
 func TestOutOfOrderCallsAreSafe(t *testing.T) {
 	var buf bytes.Buffer
 	u := NewFor(&buf, Plain, false)
-	u.Done("finished with no step started")
+	u.End("nope", true, "finished with no step started")
 	u.Detail("detail with no step")
 	u.Progress("thing", 1, 1)
-	u.Step("started")
-	u.Step("started again without finishing the first")
+	u.Begin("started")
+	u.Begin("started again without finishing the first")
 	u.Skipped("skipped")
-	u.Fail("failed with no step")
+	u.End("", false, "failed with no step")
 }

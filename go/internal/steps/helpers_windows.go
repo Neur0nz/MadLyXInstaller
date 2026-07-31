@@ -106,6 +106,61 @@ func appendLinesIfMissing(path string, lines []string) error {
 	return err
 }
 
+// reconfigureLyX makes LyX rescan the TeX installation.
+//
+// LyX decides which document classes are usable when it configures, and caches
+// that in textclass.lst. If it configured while a package was still missing -
+// which is exactly what happens when LyX is installed alongside the TeX
+// packages - it keeps saying the class is unavailable afterwards. A real run
+// produced:
+//
+//	Warning: Document class not available
+//	The selected document class Hebrew Article requires external files
+//	that are not available: article.cls, theorem.sty
+//
+// even though both files were present by then. Rescanning clears it.
+//
+// LyX ships its own Python on Windows, so this needs nothing installed.
+func reconfigureLyX(c *step.Context, l winenv.LyX) error {
+	configure := filepath.Join(l.Root, "Resources", "configure.py")
+	python := filepath.Join(l.Root, "Python", "python.exe")
+	for _, p := range []string{configure, python} {
+		if _, err := os.Stat(p); err != nil {
+			return fmt.Errorf("LyX's own Python or configure.py is missing (%s)", filepath.Base(p))
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, python, configure, "--binary-dir="+filepath.Join(l.Root, "bin"))
+	if dir, ok := step.Get[string](c, keyUserDir); ok {
+		cmd.Dir = dir // configure.py writes textclass.lst into the working directory
+	}
+	hideConsole(cmd)
+	out, err := cmd.CombinedOutput()
+	c.Log.Logf("lyx reconfigure output: %s", string(out))
+	return err
+}
+
+// textclassAvailable reports whether LyX currently believes it can use a
+// document class. This is the same file LyX consults when opening a document,
+// so it is exactly what the warning above is driven by.
+func textclassAvailable(userDir, class string) bool {
+	b, err := os.ReadFile(filepath.Join(userDir, "textclass.lst"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if !strings.Contains(line, `"`+class+`"`) {
+			continue
+		}
+		// Format: "heb-article" "article" "Hebrew Article" "true" "" "Articles"
+		return strings.Contains(line, `"true"`)
+	}
+	return false
+}
+
 // startLyXOnce launches LyX so it creates its settings folder, then closes it.
 //
 // The PowerShell version slept a fixed ten seconds and killed the process,

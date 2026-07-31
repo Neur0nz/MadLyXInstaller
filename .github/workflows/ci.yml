@@ -28,6 +28,15 @@ jobs:
         working-directory: go
         run: go test ./... -v
 
+      # Independent steps run concurrently and share the Context, so a data
+      # race here would be a real bug. windows-latest ships a C toolchain,
+      # which -race needs.
+      - name: Test with the race detector
+        working-directory: go
+        env:
+          CGO_ENABLED: '1'
+        run: go test ./internal/step/ ./internal/ui/ -race -count=1
+
       - name: Build
         working-directory: go
         run: go build -trimpath -o madlyx.exe ./cmd/madlyx

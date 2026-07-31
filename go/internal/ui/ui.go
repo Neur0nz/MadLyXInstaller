@@ -2,23 +2,26 @@
 //
 // Everything else returns values and errors; nothing else prints. That split
 // is deliberate - in the PowerShell version output was fused into the logic
-// (8-30% of every module was Write-* calls), so no function could be reused
-// or tested without also producing console noise.
+// (8-30% of every module was Write-* calls), so no function could be reused or
+// tested without also producing console noise.
 //
-// Two behaviours are load-bearing and were established by measurement rather
-// than assumption:
+// Two pterm behaviours are load-bearing here, both established by measurement:
 //
-//   - pterm's interactive prompts block forever when stdin is redirected. We
-//     never call them; Confirm below checks the terminal first.
-//   - pterm's spinners and progress bars keep emitting in-place redraws when
-//     output is piped, producing 29 carriage returns and out-of-order lines in
-//     a log file. We gate all live rendering on stdout being a terminal.
+//   - Its interactive prompts block forever when stdin is redirected. We never
+//     call them; Confirm checks the terminal first.
+//   - Its spinners and progress bars keep emitting in-place redraws when output
+//     is piped, producing 29 carriage returns and out-of-order lines in a log
+//     file. All live rendering is gated on stdout being a terminal.
+//
+// Several steps run at once, so everything here is safe to call concurrently
+// and a single spinner reports all of them together.
 package ui
 
 import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,22 +34,22 @@ import (
 type Mode int
 
 const (
-	// Rich renders spinners, progress bars and colour. Chosen when stdout is a
-	// terminal.
+	// Rich renders spinners and colour. Chosen when stdout is a terminal.
 	Rich Mode = iota
 	// Plain emits one durable line per event: no colour, no redraws, no ANSI.
-	// Chosen when output is piped or redirected.
 	Plain
 )
 
 // UI carries terminal capabilities and the assumptions that follow from them.
 type UI struct {
-	mode        Mode
-	canPrompt   bool
-	out         io.Writer
-	mu          sync.Mutex
-	activeSpin  *pterm.SpinnerPrinter
-	spinStarted time.Time
+	mode      Mode
+	canPrompt bool
+	out       io.Writer
+
+	mu      sync.Mutex
+	running map[string]time.Time // step name -> when it started
+	detail  string               // most recent activity from any running step
+	spin    *pterm.SpinnerPrinter
 }
 
 // New inspects the real terminal state once. The answer cannot change during a
@@ -59,19 +62,7 @@ func New(assumeYes bool) *UI {
 	if stdoutTTY {
 		mode = Rich
 	}
-
-	u := &UI{
-		mode: mode,
-		// Prompting needs a real terminal on *both* ends. assumeYes (from
-		// --yes / --unattended) disables questions entirely.
-		canPrompt: stdoutTTY && stdinTTY && !assumeYes,
-		out:       os.Stdout,
-	}
-	if mode == Plain {
-		pterm.DisableColor()
-		pterm.DisableStyling()
-	}
-	return u
+	return NewFor(os.Stdout, mode, stdoutTTY && stdinTTY && !assumeYes)
 }
 
 // NewFor builds a UI with the terminal state supplied rather than detected, so
@@ -81,13 +72,12 @@ func NewFor(out io.Writer, mode Mode, canPrompt bool) *UI {
 		pterm.DisableColor()
 		pterm.DisableStyling()
 	}
-	return &UI{mode: mode, canPrompt: canPrompt, out: out}
+	return &UI{mode: mode, canPrompt: canPrompt, out: out, running: map[string]time.Time{}}
 }
 
 // CanPrompt reports whether asking the user a question can actually work.
-// Callers must consult this before doing anything that needs an answer -
-// notably elevation, where a UAC dialog with nobody present is worse than
-// skipping the step.
+// Callers must consult this before anything that needs an answer - notably
+// elevation, where a UAC dialog with nobody present is worse than skipping.
 func (u *UI) CanPrompt() bool { return u.canPrompt }
 
 // Mode exposes the detected mode, mainly so tests can assert on it.
@@ -105,7 +95,9 @@ func (u *UI) Title(name, version string) {
 
 // Section starts a named phase of work.
 func (u *UI) Section(title string) {
-	u.stopSpinner("")
+	u.mu.Lock()
+	u.stopSpinnerLocked()
+	u.mu.Unlock()
 	if u.mode == Plain {
 		fmt.Fprintf(u.out, "\n== %s\n", title)
 		return
@@ -113,31 +105,73 @@ func (u *UI) Section(title string) {
 	pterm.DefaultSection.Println(title)
 }
 
-// Step announces a long-running operation. In Rich mode it becomes a live
-// spinner with elapsed time, which is the entire point: the PowerShell version
-// had ten operations with timeouts of two minutes or more that printed one line
-// and then nothing, and users reasonably concluded it had hung.
-//
-// Call Done, Failed or Skipped to finish it.
-func (u *UI) Step(text string) {
-	u.stopSpinner("")
+// Begin announces that a step has started. Several may be active at once.
+func (u *UI) Begin(step string) {
 	u.mu.Lock()
-	u.spinStarted = time.Now()
-	u.mu.Unlock()
+	defer u.mu.Unlock()
+	u.running[step] = time.Now()
+	u.detail = ""
 
 	if u.mode == Plain {
-		fmt.Fprintf(u.out, "-> %s\n", text)
+		fmt.Fprintf(u.out, "-> %s\n", step)
 		return
 	}
-	sp, _ := pterm.DefaultSpinner.WithRemoveWhenDone(false).Start(text)
+	u.refreshLocked()
+}
+
+// End reports that a step finished. ok=false renders it as a failure.
+func (u *UI) End(step string, ok bool, msg string) {
 	u.mu.Lock()
-	u.activeSpin = sp
+	started, wasRunning := u.running[step]
+	delete(u.running, step)
+	elapsed := ""
+	if wasRunning {
+		elapsed = " " + humanDuration(time.Since(started))
+	}
+	// Stop the shared spinner before printing, so the completion line is not
+	// overwritten by the next redraw.
+	u.stopSpinnerLocked()
+	u.mu.Unlock()
+
+	line := msg
+	if line == "" {
+		line = step
+	}
+	switch {
+	case u.mode == Plain && ok:
+		fmt.Fprintf(u.out, "   ok: %s%s\n", line, elapsed)
+	case u.mode == Plain:
+		fmt.Fprintf(u.out, "   FAIL: %s\n", line)
+	case ok:
+		pterm.Success.Println(line + pterm.Gray(elapsed))
+	default:
+		pterm.Error.Println(line)
+	}
+
+	// Anything still running keeps its spinner.
+	u.mu.Lock()
+	u.refreshLocked()
 	u.mu.Unlock()
 }
 
-// Progress reports position within the current step, e.g. package 7 of 24.
+// Skipped reports a step that needed no work.
+func (u *UI) Skipped(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	u.mu.Lock()
+	u.stopSpinnerLocked()
+	u.mu.Unlock()
+	if u.mode == Plain {
+		fmt.Fprintf(u.out, "   skip: %s\n", msg)
+	} else {
+		pterm.Info.Println(msg)
+	}
+	u.mu.Lock()
+	u.refreshLocked()
+	u.mu.Unlock()
+}
+
+// Progress reports position within a step, e.g. package 7 of 24.
 func (u *UI) Progress(text string, current, total int) {
-	elapsed := u.elapsed()
 	if u.mode == Plain {
 		// One durable line per item rather than a redrawn bar.
 		fmt.Fprintf(u.out, "   [%d/%d] %s\n", current, total, text)
@@ -145,119 +179,43 @@ func (u *UI) Progress(text string, current, total int) {
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.activeSpin != nil {
-		u.activeSpin.UpdateText(fmt.Sprintf("%s  [%d/%d]  %s", text, current, total, elapsed))
-	}
+	u.detail = fmt.Sprintf("%s [%d/%d]", text, current, total)
+	u.refreshLocked()
 }
 
-// Detail updates the current step's text without changing its position.
+// Detail updates the current activity without changing position.
 func (u *UI) Detail(text string) {
-	elapsed := u.elapsed()
 	if u.mode == Plain {
 		fmt.Fprintf(u.out, "   %s\n", text)
 		return
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	if u.activeSpin != nil {
-		u.activeSpin.UpdateText(fmt.Sprintf("%s  %s", text, elapsed))
-	}
-}
-
-func (u *UI) elapsed() string {
-	u.mu.Lock()
-	started := u.spinStarted
-	u.mu.Unlock()
-	if started.IsZero() {
-		return ""
-	}
-	d := time.Since(started).Round(time.Second)
-	if d < time.Minute {
-		return fmt.Sprintf("(%ds)", int(d.Seconds()))
-	}
-	return fmt.Sprintf("(%dm%02ds)", int(d.Minutes()), int(d.Seconds())%60)
-}
-
-func (u *UI) stopSpinner(final string) {
-	u.mu.Lock()
-	sp := u.activeSpin
-	u.activeSpin = nil
-	u.mu.Unlock()
-	if sp != nil {
-		if final != "" {
-			sp.Success(final)
-		} else {
-			_ = sp.Stop()
-		}
-	}
-}
-
-// Done ends the active step successfully.
-func (u *UI) Done(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
-	if u.mode == Plain {
-		u.stopSpinner("")
-		fmt.Fprintf(u.out, "   ok: %s\n", msg)
-		return
-	}
-	u.mu.Lock()
-	sp := u.activeSpin
-	u.activeSpin = nil
-	u.mu.Unlock()
-	if sp != nil {
-		sp.Success(msg)
-		return
-	}
-	pterm.Success.Println(msg)
-}
-
-// Skipped ends the active step as already-satisfied.
-func (u *UI) Skipped(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
-	if u.mode == Plain {
-		u.stopSpinner("")
-		fmt.Fprintf(u.out, "   skip: %s\n", msg)
-		return
-	}
-	u.mu.Lock()
-	sp := u.activeSpin
-	u.activeSpin = nil
-	u.mu.Unlock()
-	if sp != nil {
-		sp.Info(msg)
-		return
-	}
-	pterm.Info.Println(msg)
+	u.detail = text
+	u.refreshLocked()
 }
 
 // Warn reports something the user should know that is not fatal.
 func (u *UI) Warn(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
-	u.stopSpinner("")
+	u.mu.Lock()
+	u.stopSpinnerLocked()
+	u.mu.Unlock()
 	if u.mode == Plain {
 		fmt.Fprintf(u.out, "   warn: %s\n", msg)
-		return
+	} else {
+		pterm.Warning.Println(msg)
 	}
-	pterm.Warning.Println(msg)
+	u.mu.Lock()
+	u.refreshLocked()
+	u.mu.Unlock()
 }
 
 // Fail reports a failure.
-func (u *UI) Fail(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
-	u.mu.Lock()
-	sp := u.activeSpin
-	u.activeSpin = nil
-	u.mu.Unlock()
-	if sp != nil {
-		sp.Fail(msg)
-		return
-	}
-	if u.mode == Plain {
-		fmt.Fprintf(u.out, "   FAIL: %s\n", msg)
-		return
-	}
-	pterm.Error.Println(msg)
-}
+func (u *UI) Fail(format string, a ...any) { u.End("", false, fmt.Sprintf(format, a...)) }
+
+// Done reports a success outside any step.
+func (u *UI) Done(format string, a ...any) { u.End("", true, fmt.Sprintf(format, a...)) }
 
 // Info prints an indented note.
 func (u *UI) Info(format string, a ...any) {
@@ -269,12 +227,61 @@ func (u *UI) Info(format string, a ...any) {
 	fmt.Fprintf(u.out, "   %s\n", pterm.Gray(msg))
 }
 
+// refreshLocked redraws the shared spinner for whatever is currently running.
+// Callers must hold u.mu.
+func (u *UI) refreshLocked() {
+	if u.mode != Rich {
+		return
+	}
+	if len(u.running) == 0 {
+		u.stopSpinnerLocked()
+		return
+	}
+
+	names := make([]string, 0, len(u.running))
+	oldest := time.Now()
+	for n, t := range u.running {
+		names = append(names, n)
+		if t.Before(oldest) {
+			oldest = t
+		}
+	}
+	sort.Strings(names)
+
+	text := strings.Join(names, ", ")
+	if u.detail != "" {
+		text += " - " + u.detail
+	}
+	text += "  " + humanDuration(time.Since(oldest))
+
+	if u.spin == nil {
+		u.spin, _ = pterm.DefaultSpinner.WithRemoveWhenDone(true).Start(text)
+		return
+	}
+	u.spin.UpdateText(text)
+}
+
+func (u *UI) stopSpinnerLocked() {
+	if u.spin != nil {
+		_ = u.spin.Stop()
+		u.spin = nil
+	}
+}
+
+func humanDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return fmt.Sprintf("(%ds)", int(d.Seconds()))
+	}
+	return fmt.Sprintf("(%dm%02ds)", int(d.Minutes()), int(d.Seconds())%60)
+}
+
 // Confirm asks a yes/no question.
 //
 // When prompting is impossible it returns def without asking and says so, so a
 // piped or unattended run behaves predictably. Callers pass def=false for
-// anything that changes the system beyond the installer's own files, so that
-// an unattended run never silently edits the registry or Defender config.
+// anything that changes the system beyond the installer's own files, so an
+// unattended run never silently edits Defender configuration.
 //
 // This deliberately does not use pterm.DefaultInteractiveConfirm, which blocks
 // forever on redirected stdin.
@@ -288,7 +295,12 @@ func (u *UI) Confirm(question, detail string, def bool) bool {
 		return def
 	}
 
-	u.stopSpinner("")
+	// Steps that prompt never run alongside others, so the spinner can be
+	// stopped outright rather than restored afterwards.
+	u.mu.Lock()
+	u.stopSpinnerLocked()
+	u.mu.Unlock()
+
 	fmt.Fprintln(u.out)
 	if u.mode == Rich {
 		pterm.DefaultBasicText.Println(pterm.Bold.Sprint(" ? " + question))
@@ -330,7 +342,9 @@ func (u *UI) Confirm(question, detail string, def bool) bool {
 
 // Summary prints the closing report as a table in Rich mode.
 func (u *UI) Summary(rows [][]string) {
-	u.stopSpinner("")
+	u.mu.Lock()
+	u.stopSpinnerLocked()
+	u.mu.Unlock()
 	fmt.Fprintln(u.out)
 	if u.mode == Plain {
 		for _, r := range rows {

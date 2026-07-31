@@ -48,6 +48,7 @@ func Build(o Options) *step.Plan {
 		shortcuts(),
 		templates(),
 		macros(),
+		reconfigure(),
 	)
 	if !o.SkipSystemSteps {
 		p.Steps = append(p.Steps, defenderExclusions())
@@ -157,6 +158,24 @@ func lyxInstall(o Options) *step.Step {
 				c.UI.Detail("Windows will ask for permission - LyX installs for all users")
 			}
 			c.UI.Detail("installing LyX")
+
+			// A real run sat here for exactly the 30-minute timeout because
+			// winget was blocked on a UAC dialog behind another window. Nothing
+			// distinguished that from a slow download, so say what to look for
+			// rather than leaving a spinner turning for half an hour.
+			if !isElevated() {
+				done := make(chan struct{})
+				defer close(done)
+				go func() {
+					select {
+					case <-time.After(90 * time.Second):
+						c.UI.Detail("still installing - if Windows asked for permission, " +
+							"the prompt may be waiting behind this window")
+					case <-done:
+					}
+				}()
+			}
+
 			if err := pkgmgr.WingetInstall(ctx, o.Runner, "LyX.LyX"); err != nil {
 				c.Log.Logf("winget reported: %v", err)
 			}
@@ -253,10 +272,11 @@ func texPackages(o Options) *step.Step {
 
 func culmus(o Options) *step.Step {
 	return &step.Step{
-		ID:       "culmus",
-		Name:     "Culmus Hebrew fonts",
-		Needs:    []string{"texpackages"},
-		Optional: true,
+		ID:          "culmus",
+		Name:        "Culmus Hebrew fonts",
+		Needs:       []string{"texpackages"},
+		Optional:    true,
+		Interactive: true, // asks before downloading the HUJI installer
 		Check: func(c *step.Context) (step.State, error) {
 			t, ok := step.Get[winenv.TeX](c, keyTeX)
 			if !ok {

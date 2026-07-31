@@ -95,6 +95,9 @@ var HebrewPackages = []string{
 	"mathdots", "mhchem", "undertilde", "stackrel",
 	"xcolor", "listings", "multicol", "hyperref", "atbegshi",
 	"amsmath", "amsfonts", "dsfont", "wasysym",
+	// article.cls and theorem.sty: the heb-article class needs both, and LyX
+	// reports the class unavailable if they are missing when it configures.
+	"latex", "tools",
 	// optional extras, verified against Hebrew
 	"physics", "siunitx", "braket", "esdiff", "mathrsfs", "bbm",
 	"tcolorbox", "cleveref", "microtype", "enumitem",

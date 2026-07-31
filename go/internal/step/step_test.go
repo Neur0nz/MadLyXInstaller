@@ -2,12 +2,14 @@ package step
 
 import (
 	"errors"
+	"sync"
 	"testing"
 )
 
 // fakeUI records what a run reported, so tests can assert on behaviour without
 // a terminal. This is only possible because ui and logic are separate now.
 type fakeUI struct {
+	mu      sync.Mutex
 	skipped []string
 	failed  []string
 	steps   []string
@@ -16,17 +18,32 @@ type fakeUI struct {
 	prompts []string
 }
 
-func (f *fakeUI) Section(string)                     {}
-func (f *fakeUI) Step(t string)                      { f.steps = append(f.steps, t) }
-func (f *fakeUI) Progress(string, int, int)          {}
-func (f *fakeUI) Detail(string)                      {}
-func (f *fakeUI) Done(string, ...any)                {}
-func (f *fakeUI) Skipped(s string, a ...any)         { f.skipped = append(f.skipped, s) }
-func (f *fakeUI) Warn(string, ...any)                {}
-func (f *fakeUI) Fail(s string, a ...any)            { f.failed = append(f.failed, s) }
-func (f *fakeUI) Info(s string, a ...any)            { f.infos = append(f.infos, s) }
-func (f *fakeUI) CanPrompt() bool                    { return true }
+func (f *fakeUI) Section(string)            {}
+func (f *fakeUI) Begin(t string)            { f.mu.Lock(); defer f.mu.Unlock(); f.steps = append(f.steps, t) }
+func (f *fakeUI) Progress(string, int, int) {}
+func (f *fakeUI) Detail(string)             {}
+func (f *fakeUI) Skipped(s string, a ...any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.skipped = append(f.skipped, s)
+}
+func (f *fakeUI) Warn(string, ...any) {}
+func (f *fakeUI) Info(s string, a ...any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.infos = append(f.infos, s)
+}
+func (f *fakeUI) End(step string, ok bool, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !ok {
+		f.failed = append(f.failed, msg)
+	}
+}
+func (f *fakeUI) CanPrompt() bool { return true }
 func (f *fakeUI) Confirm(q, d string, def bool) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.prompts = append(f.prompts, q)
 	if v, ok := f.answers[q]; ok {
 		return v
@@ -34,13 +51,23 @@ func (f *fakeUI) Confirm(q, d string, def bool) bool {
 	return def
 }
 
-type fakeLog struct{ lines []string }
+var errNope = errors.New("nope")
 
-func (l *fakeLog) Logf(format string, a ...any) { l.lines = append(l.lines, format) }
+type fakeLog struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+
+func (l *fakeLog) Logf(format string, a ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, format)
+}
 
 func newCtx() (*Context, *fakeUI) {
 	u := &fakeUI{answers: map[string]bool{}}
-	return &Context{UI: u, Log: &fakeLog{}, State: map[string]any{}}, u
+	return &Context{UI: u, Log: &fakeLog{}}, u
 }
 
 func mkStep(id string, state State, apply func(*Context) error, needs ...string) *Step {

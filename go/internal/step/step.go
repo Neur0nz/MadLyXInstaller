@@ -14,6 +14,7 @@ package step
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -45,18 +46,24 @@ func (s State) String() string {
 // Context carries everything a step needs, so steps never reach for globals.
 // The PowerShell version had six ambient $script: variables, one of which threw
 // under StrictMode when a module was loaded on its own.
+//
+// State is guarded by a mutex because independent steps run concurrently.
 type Context struct {
 	UI      Reporter
 	Log     Logger
 	DryRun  bool
-	State   map[string]any // discoveries shared between steps, e.g. the LyX install
 	Verbose bool
+
+	mu    sync.RWMutex
+	state map[string]any // discoveries shared between steps, e.g. the LyX install
 }
 
 // Get retrieves a value another step recorded, with the type asserted.
 func Get[T any](c *Context, key string) (T, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	var zero T
-	v, ok := c.State[key]
+	v, ok := c.state[key]
 	if !ok {
 		return zero, false
 	}
@@ -66,23 +73,26 @@ func Get[T any](c *Context, key string) (T, bool) {
 
 // Set records a discovery for later steps.
 func (c *Context) Set(key string, value any) {
-	if c.State == nil {
-		c.State = map[string]any{}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.state == nil {
+		c.state = map[string]any{}
 	}
-	c.State[key] = value
+	c.state[key] = value
 }
 
 // Reporter is the subset of the ui package that steps are allowed to use.
 // Keeping it an interface means steps can be tested without a terminal.
 type Reporter interface {
 	Section(title string)
-	Step(text string)
+	// Begin and End bracket a step. Several may be open at once, so both take
+	// the step's name rather than relying on there being only one.
+	Begin(step string)
+	End(step string, ok bool, msg string)
 	Progress(text string, current, total int)
 	Detail(text string)
-	Done(format string, a ...any)
 	Skipped(format string, a ...any)
 	Warn(format string, a ...any)
-	Fail(format string, a ...any)
 	Info(format string, a ...any)
 	Confirm(question, detail string, def bool) bool
 	CanPrompt() bool
@@ -117,6 +127,11 @@ type Step struct {
 
 	// Optional steps do not fail the run when they fail.
 	Optional bool
+
+	// Interactive marks a step that may ask the user something. Such steps run
+	// alone, never alongside others - two concurrent prompts would queue behind
+	// each other and the user could not tell which question they were answering.
+	Interactive bool
 }
 
 // Result records what happened to one step.
@@ -163,95 +178,189 @@ func (p *Plan) Validate() error {
 	return nil
 }
 
+// Waves groups the plan into sets of steps that can run at the same time.
+//
+// A step joins the earliest wave after all of its Needs. The grouping is
+// derived from the dependency graph the steps already declare, so nothing has
+// to be marked parallel by hand - and a step that genuinely depends on another
+// can never be scheduled alongside it.
+//
+// On a real install this matters: LyX takes around ten minutes while the TeX
+// packages take seconds, and both only need the TeX distribution, so the
+// shorter work costs nothing.
+func (p *Plan) Waves() [][]*Step {
+	depth := map[string]int{}
+	var waves [][]*Step
+
+	for _, s := range p.Steps {
+		d := 0
+		for _, need := range s.Needs {
+			if nd, ok := depth[need]; ok && nd+1 > d {
+				d = nd + 1
+			}
+		}
+		depth[s.ID] = d
+		for len(waves) <= d {
+			waves = append(waves, nil)
+		}
+		waves[d] = append(waves[d], s)
+	}
+	return waves
+}
+
 // Run executes the plan.
 //
 // A step whose Check reports Satisfied is skipped, which is what makes both
 // re-running and resuming after a failure work without any special casing.
 // In a dry run nothing is applied and every Check still runs, so --dry-run
 // reports exactly what would change.
+//
+// Independent steps run concurrently; see Waves. Results come back in the
+// order the steps were declared, not the order they finished, so the summary
+// reads the same however the scheduling worked out.
 func (p *Plan) Run(ctx *Context) ([]Result, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
 
-	results := make([]Result, 0, len(p.Steps))
+	byID := map[string]*Result{}
 	succeeded := map[string]bool{}
-	var firstErr error
 
-	for _, s := range p.Steps {
-		res := Result{Step: s}
-		start := time.Now()
-
-		if missing := unmetNeeds(s, succeeded); missing != "" {
-			res.Skipped = true
-			res.Err = fmt.Errorf("%w: %s", ErrSkippedDependency, missing)
-			res.Duration = time.Since(start)
-			results = append(results, res)
-			ctx.Log.Logf("step %s skipped: needs %s", s.ID, missing)
-			ctx.UI.Skipped("%s - skipped, %s did not succeed", s.Name, missing)
+	for _, wave := range p.Waves() {
+		// Steps whose prerequisites failed are settled without running.
+		var runnable []*Step
+		for _, s := range wave {
+			if missing := unmetNeeds(s, succeeded); missing != "" {
+				byID[s.ID] = &Result{
+					Step:    s,
+					Skipped: true,
+					Err:     fmt.Errorf("%w: %s", ErrSkippedDependency, missing),
+				}
+				ctx.Log.Logf("step %s skipped: needs %s", s.ID, missing)
+				ctx.UI.Skipped("%s - skipped, %s did not succeed", s.Name, missing)
+				continue
+			}
+			runnable = append(runnable, s)
+		}
+		if len(runnable) == 0 {
 			continue
 		}
 
-		state, err := s.Check(ctx)
-		res.Before = state
-		if err != nil {
-			ctx.Log.Logf("step %s check failed: %v", s.ID, err)
-			state = Unknown
+		// Steps that may prompt run on their own: two concurrent questions
+		// would queue behind one another with no way to tell them apart.
+		var concurrent, alone []*Step
+		for _, s := range runnable {
+			if s.Interactive {
+				alone = append(alone, s)
+				continue
+			}
+			concurrent = append(concurrent, s)
 		}
 
-		if state == Satisfied {
-			res.Skipped = true
-			res.Duration = time.Since(start)
-			results = append(results, res)
-			succeeded[s.ID] = true
-			ctx.Log.Logf("step %s already satisfied", s.ID)
-			ctx.UI.Skipped("%s - already done", s.Name)
-			continue
+		var out []*Result
+		if len(concurrent) > 0 {
+			if len(concurrent) > 1 && !ctx.DryRun {
+				names := make([]string, 0, len(concurrent))
+				for _, s := range concurrent {
+					names = append(names, s.Name)
+				}
+				ctx.Log.Logf("running %d steps concurrently: %v", len(concurrent), names)
+			}
+			var wg sync.WaitGroup
+			batch := make([]*Result, len(concurrent))
+			for i, s := range concurrent {
+				i, s := i, s
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					batch[i] = runOne(ctx, s)
+				}()
+			}
+			wg.Wait()
+			out = append(out, batch...)
+		}
+		for _, s := range alone {
+			out = append(out, runOne(ctx, s))
 		}
 
-		if ctx.DryRun {
-			res.Duration = time.Since(start)
-			results = append(results, res)
-			succeeded[s.ID] = true
-			ctx.UI.Info("would run: %s", s.Name)
-			continue
-		}
-
-		ctx.UI.Step(s.Name)
-		ctx.Log.Logf("step %s applying", s.ID)
-
-		if s.Apply == nil {
-			res.Skipped = true
-			res.Duration = time.Since(start)
-			results = append(results, res)
-			succeeded[s.ID] = true
-			ctx.UI.Skipped("%s - nothing to do", s.Name)
-			continue
-		}
-
-		err = s.Apply(ctx)
-		res.Duration = time.Since(start)
-		res.Applied = err == nil
-		res.Err = err
-
-		switch {
-		case err == nil:
-			succeeded[s.ID] = true
-			ctx.Log.Logf("step %s applied in %s", s.ID, res.Duration)
-		case s.Optional:
-			ctx.Log.Logf("step %s failed (optional): %v", s.ID, err)
-			ctx.UI.Warn("%s did not complete: %v", s.Name, err)
-		default:
-			ctx.Log.Logf("step %s failed: %v", s.ID, err)
-			ctx.UI.Fail("%s failed: %v", s.Name, err)
-			if firstErr == nil {
-				firstErr = fmt.Errorf("step %q: %w", s.ID, err)
+		for _, r := range out {
+			byID[r.Step.ID] = r
+			if r.Err == nil {
+				succeeded[r.Step.ID] = true
 			}
 		}
-		results = append(results, res)
 	}
 
+	// Report in declaration order regardless of completion order.
+	results := make([]Result, 0, len(p.Steps))
+	var firstErr error
+	for _, s := range p.Steps {
+		r, ok := byID[s.ID]
+		if !ok {
+			continue
+		}
+		results = append(results, *r)
+		if r.Err != nil && !s.Optional && !errors.Is(r.Err, ErrSkippedDependency) && firstErr == nil {
+			firstErr = fmt.Errorf("step %q: %w", s.ID, r.Err)
+		}
+	}
 	return results, firstErr
+}
+
+// runOne executes a single step and reports on it. Safe to call concurrently;
+// the UI serialises its own writes.
+func runOne(ctx *Context, s *Step) *Result {
+	res := &Result{Step: s}
+	start := time.Now()
+
+	state, err := s.Check(ctx)
+	res.Before = state
+	if err != nil {
+		ctx.Log.Logf("step %s check failed: %v", s.ID, err)
+		state = Unknown
+	}
+
+	switch {
+	case state == Satisfied:
+		res.Skipped = true
+		res.Duration = time.Since(start)
+		ctx.Log.Logf("step %s already satisfied", s.ID)
+		ctx.UI.Skipped("%s - already done", s.Name)
+		return res
+
+	case ctx.DryRun:
+		res.Duration = time.Since(start)
+		ctx.UI.Info("would run: %s", s.Name)
+		return res
+
+	case s.Apply == nil:
+		res.Skipped = true
+		res.Duration = time.Since(start)
+		ctx.UI.Skipped("%s - nothing to do", s.Name)
+		return res
+	}
+
+	ctx.UI.Begin(s.Name)
+	ctx.Log.Logf("step %s applying", s.ID)
+
+	err = s.Apply(ctx)
+	res.Duration = time.Since(start)
+	res.Applied = err == nil
+	res.Err = err
+
+	switch {
+	case err == nil:
+		ctx.Log.Logf("step %s applied in %s", s.ID, res.Duration)
+		ctx.UI.End(s.Name, true, s.Name)
+	case s.Optional:
+		ctx.Log.Logf("step %s failed (optional): %v", s.ID, err)
+		ctx.UI.End(s.Name, true, "") // clear the spinner entry
+		ctx.UI.Warn("%s did not complete: %v", s.Name, err)
+	default:
+		ctx.Log.Logf("step %s failed: %v", s.ID, err)
+		ctx.UI.End(s.Name, false, fmt.Sprintf("%s failed: %v", s.Name, err))
+	}
+	return res
 }
 
 // Rollback undoes applied steps in reverse order. Steps without an Undo are
@@ -268,13 +377,13 @@ func (p *Plan) Rollback(ctx *Context, results []Result) []error {
 			ctx.UI.Warn("%s cannot be undone automatically", r.Step.Name)
 			continue
 		}
-		ctx.UI.Step("Undoing " + r.Step.Name)
+		ctx.UI.Begin("Undoing " + r.Step.Name)
 		if err := r.Step.Undo(ctx); err != nil {
 			problems = append(problems, fmt.Errorf("undo %s: %w", r.Step.ID, err))
-			ctx.UI.Fail("could not undo %s: %v", r.Step.Name, err)
+			ctx.UI.End("Undoing "+r.Step.Name, false, fmt.Sprintf("could not undo %s: %v", r.Step.Name, err))
 			continue
 		}
-		ctx.UI.Done("undid %s", r.Step.Name)
+		ctx.UI.End("Undoing "+r.Step.Name, true, fmt.Sprintf("undid %s", r.Step.Name))
 	}
 	return problems
 }
