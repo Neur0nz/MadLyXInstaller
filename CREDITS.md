@@ -59,7 +59,7 @@ Alt+M conflict, p. 34).
 
 ## This installer
 
-The PowerShell in `install.ps1`, `lib/` and `tests/`, and the assembled
-`payload/preamble/madlyx-preamble.tex`, are the contribution of this repository.
+The Go source under `go/`, the `bootstrap.ps1` launcher, and the assembled
+`payload/preamble/madlyx-preamble.tex` are the contribution of this repository.
 The preamble's contents are taken from the guide, with page references in the
 comments; the Hebrew justification block is the only addition.

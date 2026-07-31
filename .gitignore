@@ -18,3 +18,10 @@ madlyx-spike.exe
 
 go/internal/payload/data/
 
+
+# built binary
+go/madlyx.exe
+go/*.exe
+
+# session state
+.claude/
