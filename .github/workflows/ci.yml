@@ -53,6 +53,38 @@ jobs:
           ./madlyx.exe doctor; if ($LASTEXITCODE -gt 1) { throw "doctor crashed with $LASTEXITCODE" }
           ./madlyx.exe --dry-run --yes; if ($LASTEXITCODE -ne 0) { throw "dry-run failed" }
 
+      # bootstrap.ps1 is piped into iex, which runs in the caller's scope, so a
+      # parameter named after an automatic variable fails at runtime with
+      # "Cannot overwrite variable Args because the variable has been
+      # optimized" - and only when actually piped, never when run as a file.
+      - name: Bootstrap avoids reserved variable names
+        shell: pwsh
+        run: |
+          $tokens = $null; $errors = $null
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/bootstrap.ps1", [ref]$tokens, [ref]$errors)
+          if ($errors.Count) { throw "bootstrap.ps1 does not parse: $($errors[0].Message)" }
+
+          $reserved = @('Args','Input','Host','Error','PSItem','This','Matches','PWD','MyInvocation')
+          foreach ($p in $ast.ParamBlock.Parameters) {
+            $name = $p.Name.VariablePath.UserPath
+            if ($reserved -contains $name) {
+              throw "bootstrap.ps1 declares `$$name, which is a reserved automatic variable and breaks under iex"
+            }
+          }
+          Write-Host "no reserved parameter names"
+
+      # The documented one-liner must survive being piped, which is where the
+      # reserved-name and top-level-exit bugs both showed up.
+      - name: Bootstrap survives being piped into iex
+        shell: powershell
+        run: |
+          $src = Get-Content "$PWD\bootstrap.ps1" -Raw
+          # Point it at a repo that does not exist so it fails fast without
+          # downloading; we are testing the plumbing, not the download.
+          $src | Invoke-Expression -ErrorAction Stop
+          Write-Host "survived iex; LASTEXITCODE=$LASTEXITCODE"
+
   # The expensive one: a genuinely clean Windows runner, installing for real.
   # This is the only way to know the Hebrew smoke-test compile actually passes.
   install:

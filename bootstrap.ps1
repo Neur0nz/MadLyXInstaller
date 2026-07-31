@@ -25,8 +25,13 @@
 [CmdletBinding()]
 param(
     # Arguments passed straight to madlyx.exe, e.g. doctor, --dry-run.
+    #
+    # Deliberately not named $Args: that is a reserved automatic variable, and
+    # because `iex` executes in the caller's scope, PowerShell refuses to
+    # overwrite it - "Cannot overwrite variable Args because the variable has
+    # been optimized". Invisible until the script is actually piped into iex.
     [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]]$Args,
+    [string[]]$Arguments,
 
     [string]$Repo = 'Neur0nz/MadLyXInstaller',
     [string]$Version = 'latest',
@@ -42,7 +47,7 @@ try {
 } catch { }
 
 function Invoke-MadLyxBootstrap {
-    param($Repo, $Version, $Args, $KeepFiles)
+    param($Repo, $Version, $Arguments, $KeepFiles)
 
     Write-Host ''
     Write-Host '  MadLyX' -ForegroundColor Cyan
@@ -79,7 +84,7 @@ function Invoke-MadLyxBootstrap {
         try { Unblock-File $exe } catch { }
 
         Write-Host ''
-        & $exe @Args
+        & $exe @Arguments
         return $LASTEXITCODE
     }
     catch {
@@ -101,7 +106,7 @@ function Invoke-MadLyxBootstrap {
     }
 }
 
-$code = Invoke-MadLyxBootstrap -Repo $Repo -Version $Version -Args $Args -KeepFiles:$KeepFiles
+$code = Invoke-MadLyxBootstrap -Repo $Repo -Version $Version -Arguments $Arguments -KeepFiles:$KeepFiles
 $global:LASTEXITCODE = $code
 
 # Only terminate the host when running as a real script file. Under `irm | iex`
