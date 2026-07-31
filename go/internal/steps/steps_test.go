@@ -104,8 +104,8 @@ func TestPayloadIsEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 11 {
-		t.Errorf("expected 11 embedded files, got %d: %v", len(files), files)
+	if len(files) != 12 {
+		t.Errorf("expected 12 embedded files, got %d: %v", len(files), files)
 	}
 	// Byte counts must match what Kali published: .gitattributes marks the
 	// payload as binary so git cannot rewrite line endings.

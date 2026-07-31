@@ -202,6 +202,19 @@ func (u *UI) End(step string, ok bool, msg string) {
 	u.mu.Unlock()
 }
 
+// Drop removes a step from the live block without announcing anything.
+//
+// Used when an optional step fails: the caller follows with a warning, and
+// ending it as a success first printed "SUCCESS Defender exclusions" directly
+// above "WARNING Defender exclusions did not complete", which read as both at
+// once.
+func (u *UI) Drop(step string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.forgetLocked(step)
+	u.renderLocked()
+}
+
 // Skipped reports a step that needed no work.
 func (u *UI) Skipped(format string, a ...any) {
 	u.durable(func(msg string) { pterm.Info.Println(msg) }, "   skip: %s\n", format, a...)
@@ -383,30 +396,46 @@ func (u *UI) frameLocked() string {
 		name := fit(n, nameWidth)
 
 		// Compose in plain text so the width arithmetic is not thrown off by
-		// the escape sequences colour adds.
-		fixed := 3 + nameWidth + 2 + 2 + len(elapsed)
-		detail := fit(t.detail, u.width-fixed-1)
+		// the escape sequences colour adds, and leave two columns spare.
+		//
+		// The detail is deliberately not padded out to the full width. Padding
+		// made every line exactly as wide as the terminal, and a line that
+		// exactly fills a terminal wraps - which cost the redraw a line and
+		// made the whole block scroll down the screen instead of repainting.
+		fixed := 3 + len([]rune(name)) + 2 + 1 + len(elapsed)
+		detail := trunc(t.detail, u.width-fixed-2)
 
 		b.WriteString("\n   " + name + "  " + pterm.Gray(detail))
-		b.WriteString(strings.Repeat(" ", 2) + pterm.Gray(elapsed))
+		b.WriteString(" " + pterm.Gray(elapsed))
 	}
 	return b.String()
 }
 
-// fit pads or truncates to exactly n columns, so columns line up and a long
-// detail string can never wrap and desynchronise the redraw.
+// fit pads or truncates to exactly n columns, so the name column lines up.
 func fit(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
 	r := []rune(s)
 	if len(r) > n {
-		if n <= 1 {
-			return string(r[:n])
-		}
-		return string(r[:n-1]) + "…"
+		return trunc(s, n)
 	}
 	return s + strings.Repeat(" ", n-len(r))
+}
+
+// trunc shortens to at most n columns without padding.
+func trunc(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n == 1 {
+		return "…"
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func humanDuration(d time.Duration) string {

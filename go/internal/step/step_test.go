@@ -24,6 +24,7 @@ type fakeUI struct {
 }
 
 func (f *fakeUI) Section(string)            {}
+func (f *fakeUI) Drop(string)               {}
 func (f *fakeUI) Begin(t string)            { f.mu.Lock(); defer f.mu.Unlock(); f.steps = append(f.steps, t) }
 func (f *fakeUI) Progress(string, int, int) {}
 func (f *fakeUI) Detail(string)             {}

@@ -120,9 +120,24 @@ func reconfigure() *step.Step {
 	}
 }
 
-// smokeTest is the only check that proves the whole chain works: LyX, the TeX
-// distribution, babel-hebrew and culmus all have to cooperate to turn a Hebrew
-// document into a PDF.
+// smokeTest proves the Hebrew toolchain works: the TeX distribution,
+// babel-hebrew, culmus and the David font all have to cooperate to turn a
+// Hebrew document into a PDF.
+//
+// It compiles with pdflatex directly rather than by asking LyX to export, and
+// that is a deliberate retreat. Driving LyX was the better test - it exercised
+// the same path the user's own Ctrl+R does - but it could not be made quiet.
+// Measured on a real machine, running LyX's export returned zero bytes on
+// stdout and stderr under every process creation flag Windows offers
+// (CREATE_NO_WINDOW, DETACHED_PROCESS, CREATE_NEW_CONSOLE), while pdflatex's
+// output landed in the user's console every single time. Nothing about how we
+// spawn the process can change that, so pages of METAFONT output scrolled
+// through the middle of the progress display on every fresh install.
+//
+// Compiling the exported .tex ourselves gives up verifying LyX's export step
+// and gains three things: no console spam, output we can actually read, and a
+// real LaTeX log to diagnose from. What LyX contributes is checked separately -
+// that it is installed, configured, and reports heb-article as available.
 func smokeTest() *step.Step {
 	return &step.Step{
 		ID:       "smoketest",
@@ -134,9 +149,9 @@ func smokeTest() *step.Step {
 			return step.Pending, nil
 		},
 		Apply: func(c *step.Context) error {
-			l, ok := step.Get[winenv.LyX](c, keyLyX)
+			t, ok := step.Get[winenv.TeX](c, keyTeX)
 			if !ok {
-				return fmt.Errorf("no LyX recorded")
+				return fmt.Errorf("no TeX distribution recorded")
 			}
 			// Deliberately an ASCII-only working directory: a Hebrew path here
 			// would be testing the wrong thing.
@@ -146,28 +161,36 @@ func smokeTest() *step.Step {
 			}
 			defer os.RemoveAll(work)
 
-			src := filepath.Join(work, "smoketest.lyx")
-			if err := payload.WriteTo("data/smoketest/smoketest.lyx", src); err != nil {
+			// Shipped byte-exact in cp1255, which is the encoding its own
+			// \usepackage[cp1255]{inputenc} declares. Re-encoding it to UTF-8
+			// would turn every Hebrew character into mojibake.
+			src := filepath.Join(work, "smoketest.tex")
+			if err := payload.WriteTo("data/smoketest/smoketest.tex", src); err != nil {
 				return err
 			}
-			out := filepath.Join(work, "smoketest.pdf")
 
 			c.UI.Detail("compiling (the first run builds a font cache and can take minutes)")
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 			defer cancel()
 
-			cmd := exec.CommandContext(ctx, l.Exe, "-E", "pdf2", out, src)
-			// Keep LyX's warnings and pdflatex's output out of the user's
-			// terminal; they go to the log instead.
+			cmd := exec.CommandContext(ctx, filepath.Join(t.BinDir, "pdflatex.exe"),
+				"-interaction=nonstopmode", "-halt-on-error", "smoketest.tex")
+			cmd.Dir = work
 			hideConsole(cmd)
 			combined, runErr := cmd.CombinedOutput()
 			c.Log.Logf("smoke test output: %s", string(combined))
 
+			out := filepath.Join(work, "smoketest.pdf")
 			if st, err := os.Stat(out); err == nil && st.Size() > 0 {
 				c.UI.Detail(fmt.Sprintf("produced a %d KB Hebrew PDF", st.Size()/1024))
 				return nil
 			}
-			return fmt.Errorf("%s", diagnoseCompile(string(combined), runErr))
+
+			// The .log records which package was missing even when the console
+			// output is unhelpful, so prefer it and fall back to what we caught.
+			texLog, _ := os.ReadFile(filepath.Join(work, "smoketest.log"))
+			c.Log.Logf("latex log: %s", string(texLog))
+			return fmt.Errorf("%s", diagnoseCompile(string(texLog)+string(combined), runErr))
 		},
 	}
 }

@@ -44,8 +44,8 @@ func TestEverythingNeededIsEmbedded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) != 11 {
-		t.Errorf("expected 11 files, got %d: %v", len(files), files)
+	if len(files) != 12 {
+		t.Errorf("expected 12 files, got %d: %v", len(files), files)
 	}
 	for _, needed := range []string{
 		"preamble/madlyx-preamble.tex",

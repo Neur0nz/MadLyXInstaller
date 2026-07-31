@@ -136,6 +136,8 @@ type Reporter interface {
 	// Overall reports how much of the plan has settled, so the display can say
 	// "3 of 13" rather than only naming what happens to be running.
 	Overall(done, total int)
+	// Drop removes a step from the display without announcing an outcome.
+	Drop(step string)
 	Skipped(format string, a ...any)
 	Warn(format string, a ...any)
 	Info(format string, a ...any)
@@ -424,7 +426,7 @@ func runOne(root *Context, s *Step) *Result {
 		ctx.UI.End(s.Name, true, s.Name)
 	case s.Optional:
 		ctx.Log.Logf("step %s failed (optional): %v", s.ID, err)
-		ctx.UI.End(s.Name, true, "") // clear the spinner entry
+		ctx.UI.Drop(s.Name) // not a success; the warning below is the outcome
 		ctx.UI.Warn("%s did not complete: %v", s.Name, err)
 	default:
 		ctx.Log.Logf("step %s failed: %v", s.ID, err)

@@ -152,8 +152,15 @@ func lyxInstall(o Options) *step.Step {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
 
+			// Say why this is the slow one. Most of the time is not the 57.6 MB
+			// download - measured at 2.7 MB/s from the mirror winget uses, so
+			// about twenty seconds - but LyX's installer configuring itself
+			// against a TeX installation that is minutes old and completely
+			// cold. A real run took 8m30s on a fresh machine and 41s against a
+			// warm MiKTeX. Without saying so, a motionless line here reads as a
+			// hang, which is exactly what it was mistaken for.
 			progress := func(phase string) { c.UI.Detail(phase) }
-			c.UI.Detail("installing LyX")
+			c.UI.Detail("installing LyX, then letting it scan your new TeX setup (several minutes)")
 
 			// Install for this user only, which needs no administrator rights.
 			//
