@@ -9,3 +9,9 @@
 .idea/
 Thumbs.db
 desktop.ini
+
+# staged at build time by the spike workflow
+spike/payload/
+spike/*.exe
+madlyx-spike.exe
+
