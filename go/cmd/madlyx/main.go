@@ -153,24 +153,41 @@ func runDoctor(g globalFlags) error {
 	results := plan.Diagnose(ctx)
 
 	rows := [][]string{{"Step", "State", "Note"}}
-	var problems int
+	var problems, offers int
 	for _, r := range results {
 		note := ""
 		if r.Err != nil {
 			note = r.Err.Error()
 		}
-		if r.Before != step.Satisfied {
+
+		state := r.Before.String()
+		switch {
+		case r.Before == step.Satisfied:
+			// nothing to report
+		case r.Step.Optional:
+			// Optional steps are offers the user may have declined, and the
+			// test compile verifies rather than configures, so it is never
+			// "satisfied". Neither is a fault in the installation.
+			state = "not applied"
+			if note == "" {
+				note = "optional"
+			}
+			offers++
+		default:
 			problems++
 		}
-		rows = append(rows, []string{r.Step.Name, r.Before.String(), note})
+		rows = append(rows, []string{r.Step.Name, state, note})
 	}
 	u.Summary(rows)
 
 	if problems == 0 {
-		u.Done("no problems found")
+		u.Done("installation looks healthy")
+		if offers > 0 {
+			u.Info("%d optional step(s) not applied - run 'madlyx install' if you want them", offers)
+		}
 		return nil
 	}
-	u.Warn("%d step(s) not satisfied - run 'madlyx install' to fix", problems)
+	u.Warn("%d step(s) need attention - run 'madlyx install' to fix", problems)
 	return fmt.Errorf("%d problem(s) found", problems)
 }
 
