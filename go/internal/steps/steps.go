@@ -99,8 +99,9 @@ func texDistribution(o Options) *step.Step {
 				// default precisely because it can install packages on demand.
 				return fmt.Errorf("TeX Live must be installed manually from https://tug.org/texlive/")
 			}
-			if err := pkgmgr.WingetInstallProgress(ctx, o.Runner, id, nil,
-				func(phase string) { c.UI.Detail(phase) }); err != nil {
+			if err := pkgmgr.WingetInstallOpts(ctx, o.Runner, id, pkgmgr.WingetOpts{
+				Progress: func(phase string) { c.UI.Detail(phase) },
+			}); err != nil {
 				c.Log.Logf("winget reported: %v", err)
 			}
 
@@ -187,8 +188,15 @@ func lyxInstall(o Options) *step.Step {
 				}
 			}()
 
-			if err := pkgmgr.WingetInstallProgress(ctx, o.Runner, "LyX.LyX",
-				[]string{"/CurrentUser"}, progress); err != nil {
+			// RunAsInvoker is what actually removes the UAC dialog. /CurrentUser
+			// alone decides where LyX installs, not whether Windows asks for
+			// permission first - a real run landed correctly in %LOCALAPPDATA%
+			// with HKCU only and still prompted.
+			if err := pkgmgr.WingetInstallOpts(ctx, o.Runner, "LyX.LyX", pkgmgr.WingetOpts{
+				Custom:   []string{"/CurrentUser"},
+				Env:      []string{pkgmgr.RunAsInvoker},
+				Progress: progress,
+			}); err != nil {
 				c.Log.Logf("winget (per-user) reported: %v", err)
 			}
 
@@ -203,7 +211,8 @@ func lyxInstall(o Options) *step.Step {
 			// failing outright on a machine where the per-user path did not work.
 			c.Log.Logf("per-user install did not produce a LyX; retrying machine-wide")
 			c.UI.Detail("retrying - Windows may ask for permission")
-			if err := pkgmgr.WingetInstallProgress(ctx, o.Runner, "LyX.LyX", nil, progress); err != nil {
+			if err := pkgmgr.WingetInstallOpts(ctx, o.Runner, "LyX.LyX",
+				pkgmgr.WingetOpts{Progress: progress}); err != nil {
 				c.Log.Logf("winget reported: %v", err)
 			}
 			if l, ok := winenv.WaitFor(3*time.Minute, 2*time.Second, winenv.FindLyX); ok {

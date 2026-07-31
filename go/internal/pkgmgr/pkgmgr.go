@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -17,10 +18,39 @@ import (
 // the console. An interface so steps can be tested without running anything.
 type Runner interface {
 	Run(ctx context.Context, name string, args ...string) (string, error)
-	// RunStream is Run with a callback for each line as it arrives, so a
-	// command that takes minutes can say what it is doing while it does it.
-	RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, error)
+	// RunWith is Run with per-call options: progress lines as they arrive, and
+	// extra environment variables for the child and everything it spawns.
+	RunWith(ctx context.Context, o RunOpts, name string, args ...string) (string, error)
 }
+
+// RunOpts are the per-call knobs. A struct rather than more parameters,
+// because both are needed together exactly once and neither is common.
+type RunOpts struct {
+	// OnLine receives each output line as it appears, so a command that takes
+	// minutes can say what it is doing while it does it.
+	OnLine func(string)
+	// Env adds to the child's environment rather than replacing it.
+	Env []string
+}
+
+// RunAsInvoker stops Windows elevating a child that asks for the highest
+// privileges available to the user.
+//
+// LyX's installer is built with MULTIUSER_EXECUTIONLEVEL Highest, which
+// compiles to RequestExecutionLevel highest. For an administrator account that
+// means Windows shows a UAC dialog when the installer starts - regardless of
+// /CurrentUser, which decides where it installs but not whether it elevates.
+// The result was an install that correctly landed in %LOCALAPPDATA% with HKCU
+// only, and still asked for permission on the way.
+//
+// This is the documented application-compatibility shim for exactly that
+// situation: run the child with the caller's token instead of requesting a
+// higher one. It is safe here precisely because /CurrentUser makes the install
+// genuinely per-user - it writes nothing that needs administrator rights - so
+// there is no elevated work being silently skipped. If the per-user install
+// fails anyway, the caller falls back to the ordinary machine-wide one, which
+// asks for permission properly.
+const RunAsInvoker = "__COMPAT_LAYER=RunAsInvoker"
 
 // ExecRunner is the real implementation.
 type ExecRunner struct {
@@ -29,11 +59,11 @@ type ExecRunner struct {
 
 // Run executes a command with a deadline, returning combined output.
 func (r ExecRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
-	return r.RunStream(ctx, nil, name, args...)
+	return r.RunWith(ctx, RunOpts{}, name, args...)
 }
 
-// RunStream executes a command, reporting each output line as it appears.
-func (r ExecRunner) RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
+// RunWith executes a command with per-call options.
+func (r ExecRunner) RunWith(ctx context.Context, o RunOpts, name string, args ...string) (string, error) {
 	if r.Log != nil {
 		r.Log("run: %s %s", name, strings.Join(args, " "))
 	}
@@ -41,11 +71,19 @@ func (r ExecRunner) RunStream(ctx context.Context, onLine func(string), name str
 
 	var buf bytes.Buffer
 	var sink io.Writer = &buf
-	if onLine != nil {
-		sink = io.MultiWriter(&buf, &lineWriter{emit: onLine})
+	if o.OnLine != nil {
+		sink = io.MultiWriter(&buf, &lineWriter{emit: o.OnLine})
 	}
 	cmd.Stdout = sink
 	cmd.Stderr = sink
+	if len(o.Env) > 0 {
+		// Added to the inherited environment, not replacing it: winget needs
+		// the usual variables to find its own data.
+		cmd.Env = append(os.Environ(), o.Env...)
+		if r.Log != nil {
+			r.Log("with environment: %s", strings.Join(o.Env, " "))
+		}
+	}
 	hideConsole(cmd)
 
 	err := cmd.Run()
@@ -104,34 +142,41 @@ func Available(name string) bool {
 // packages. The accept flags matter too - on a machine that has never run
 // winget, the source-agreement prompt blocks forever.
 func WingetInstall(ctx context.Context, r Runner, id string) error {
-	return WingetInstallProgress(ctx, r, id, nil, nil)
+	return WingetInstallOpts(ctx, r, id, WingetOpts{})
 }
 
-// WingetInstallProgress is WingetInstall that says what winget is doing, and
-// optionally passes extra switches through to the underlying installer.
-//
-// progress receives phrases like "downloading 41.2 MB of 57.6 MB" - LyX takes
-// minutes to install, and a motionless "installing LyX" is indistinguishable
-// from a hang. A real run sat on that line for the full 30-minute timeout.
-func WingetInstallProgress(ctx context.Context, r Runner, id string, custom []string, progress func(string)) error {
+// WingetOpts customises an install.
+type WingetOpts struct {
+	// Custom is passed through to the underlying installer.
+	Custom []string
+	// Env adds variables for winget and the installer it launches.
+	Env []string
+	// Progress receives phrases like "downloading 41.2 MB of 57.6 MB". LyX
+	// takes minutes, and a motionless "installing LyX" is indistinguishable
+	// from a hang - a real run sat on that line for the full 30-minute timeout.
+	Progress func(string)
+}
+
+// WingetInstallOpts installs a package by exact ID with options.
+func WingetInstallOpts(ctx context.Context, r Runner, id string, o WingetOpts) error {
 	args := []string{"install", "--id", id, "--exact", "--silent",
 		"--accept-package-agreements", "--accept-source-agreements",
 		"--disable-interactivity"}
-	if len(custom) > 0 {
+	if len(o.Custom) > 0 {
 		// --custom appends to the switches winget already passes, rather than
 		// replacing them as --override would.
-		args = append(args, "--custom", strings.Join(custom, " "))
+		args = append(args, "--custom", strings.Join(o.Custom, " "))
 	}
 
 	var onLine func(string)
-	if progress != nil {
+	if o.Progress != nil {
 		onLine = func(line string) {
 			if phase := wingetPhase(line); phase != "" {
-				progress(phase)
+				o.Progress(phase)
 			}
 		}
 	}
-	_, err := r.RunStream(ctx, onLine, "winget", args...)
+	_, err := r.RunWith(ctx, RunOpts{OnLine: onLine, Env: o.Env}, "winget", args...)
 	return err
 }
 

@@ -11,17 +11,19 @@ type fakeRunner struct {
 	calls [][]string
 	fail  map[string]bool
 	emit  []string // lines handed to the progress callback
+	env   []string // extra environment variables the caller asked for
 }
 
 func (f *fakeRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
-	return f.RunStream(ctx, nil, name, args...)
+	return f.RunWith(ctx, RunOpts{}, name, args...)
 }
 
-func (f *fakeRunner) RunStream(_ context.Context, onLine func(string), name string, args ...string) (string, error) {
+func (f *fakeRunner) RunWith(_ context.Context, o RunOpts, name string, args ...string) (string, error) {
 	f.calls = append(f.calls, append([]string{name}, args...))
-	if onLine != nil {
+	f.env = append(f.env, o.Env...)
+	if o.OnLine != nil {
 		for _, l := range f.emit {
-			onLine(l)
+			o.OnLine(l)
 		}
 	}
 	for _, a := range args {
@@ -118,8 +120,9 @@ func TestWingetProgressIsTranslatedNotEchoed(t *testing.T) {
 		"Starting package install...",
 	}}
 	var seen []string
-	err := WingetInstallProgress(context.Background(), r, "LyX.LyX", nil,
-		func(p string) { seen = append(seen, p) })
+	err := WingetInstallOpts(context.Background(), r, "LyX.LyX", WingetOpts{
+		Progress: func(p string) { seen = append(seen, p) },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,5 +162,27 @@ func TestLineWriterBoundsAnUnbrokenStream(t *testing.T) {
 	}
 	if len(w.buf) > 8192 {
 		t.Errorf("buffer grew to %d bytes", len(w.buf))
+	}
+}
+
+// /CurrentUser decides where LyX installs; it does not stop Windows asking for
+// permission first. A real run landed in %LOCALAPPDATA% with HKCU only and
+// still showed a UAC dialog, because the installer requests the highest
+// available privileges from its manifest. RunAsInvoker is what suppresses that,
+// so it must accompany the per-user switch.
+func TestPerUserInstallSuppressesElevation(t *testing.T) {
+	r := &fakeRunner{}
+	err := WingetInstallOpts(context.Background(), r, "LyX.LyX", WingetOpts{
+		Custom: []string{"/CurrentUser"},
+		Env:    []string{RunAsInvoker},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call := strings.Join(r.calls[0], " "); !strings.Contains(call, "--custom /CurrentUser") {
+		t.Errorf("per-user switch not passed to the installer: %s", call)
+	}
+	if !strings.Contains(strings.Join(r.env, " "), "__COMPAT_LAYER=RunAsInvoker") {
+		t.Errorf("RunAsInvoker not set, so Windows would still prompt: %v", r.env)
 	}
 }
