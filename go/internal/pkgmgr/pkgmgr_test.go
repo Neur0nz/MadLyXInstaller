@@ -3,6 +3,8 @@ package pkgmgr
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -184,5 +186,35 @@ func TestPerUserInstallSuppressesElevation(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(r.env, " "), "__COMPAT_LAYER=RunAsInvoker") {
 		t.Errorf("RunAsInvoker not set, so Windows would still prompt: %v", r.env)
+	}
+}
+
+// The download must not run anything, and must ask winget for a directory we
+// control - launching via winget is precisely what stopped RunAsInvoker working.
+func TestWingetDownloadDoesNotInstall(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "LyX_2.4.4.1_X64_nullsoft_en-US.exe"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// winget writes a manifest beside the installer; it must not be mistaken
+	// for the thing to run.
+	if err := os.WriteFile(filepath.Join(dir, "LyX_2.4.4.1_X64_nullsoft_en-US.yaml"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &fakeRunner{}
+	got, err := WingetDownload(context.Background(), r, "LyX.LyX", dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Ext(got) != ".exe" {
+		t.Errorf("picked %q, which is not the installer", got)
+	}
+	call := strings.Join(r.calls[0], " ")
+	if !strings.Contains(call, "winget download") {
+		t.Errorf("did not use the download verb: %s", call)
+	}
+	if strings.Contains(call, "install") {
+		t.Errorf("download must not install: %s", call)
 	}
 }

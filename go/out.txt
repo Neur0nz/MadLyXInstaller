@@ -1,0 +1,43 @@
+MadLyX Installer v0.6.0-test
+   skip: Checking your system - already done
+   skip: TeX distribution - already done
+-> LyX
+   installing LyX, then letting it scan your new TeX setup (several minutes)
+   found it; starting
+   downloading
+   skip: Hebrew LaTeX packages - already done
+   verified the download
+   running the LyX installer
+   waiting for the installation to settle
+   ok: LyX (53s)
+-> Defender exclusions
+   warn: Defender exclusions did not complete: needs administrator rights - re-run with --elevate if you want it
+   skip: Macros and shared preamble - already done
+   skip: LyX settings folder - already done
+   skip: Culmus Hebrew fonts - already done
+   skip: Rescanning TeX from LyX - already done
+   skip: MadLyX settings - already done
+   skip: Document templates - already done
+   skip: MadLyX shortcuts - already done
+
+Step: Result Time
+Checking your system: already done 0s
+TeX distribution: already done 5ms
+LyX: done 52.745s
+LyX settings folder: already done 0s
+Hebrew LaTeX packages: already done 1.045s
+Culmus Hebrew fonts: already done 558ms
+MadLyX settings: already done 0s
+MadLyX shortcuts: already done 0s
+Document templates: already done 0s
+Macros and shared preamble: already done 0s
+Rescanning TeX from LyX: already done 0s
+Defender exclusions: skipped 1.007s
+   log: C:\Users\nadav\AppData\Local\MadLyXInstaller\install-20260801-011841.log
+
+== Things to know
+   F12 switches between Hebrew and English inside LyX.
+   Keep Windows itself on ENG - LyX supplies the Hebrew.
+   Ctrl+Shift+N starts a document from a MadLyX template.
+   Check the shortcuts loaded: in a maths box, Alt+W then A gives a Greek alpha.
+   Keep Hebrew out of folder names above your documents.

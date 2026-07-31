@@ -188,16 +188,33 @@ func lyxInstall(o Options) *step.Step {
 				}
 			}()
 
-			// RunAsInvoker is what actually removes the UAC dialog. /CurrentUser
-			// alone decides where LyX installs, not whether Windows asks for
-			// permission first - a real run landed correctly in %LOCALAPPDATA%
-			// with HKCU only and still prompted.
-			if err := pkgmgr.WingetInstallOpts(ctx, o.Runner, "LyX.LyX", pkgmgr.WingetOpts{
-				Custom:   []string{"/CurrentUser"},
-				Env:      []string{pkgmgr.RunAsInvoker},
-				Progress: progress,
-			}); err != nil {
-				c.Log.Logf("winget (per-user) reported: %v", err)
+			// Download with winget, then run the installer ourselves.
+			//
+			// Two things have to be true at once, and only this ordering gets
+			// both. /CurrentUser makes the install per-user, and RunAsInvoker
+			// stops Windows elevating an installer whose manifest asks for the
+			// highest available privileges. But environment variables do not
+			// survive the hop through winget: setting RunAsInvoker on the winget
+			// process left the dialog exactly where it was, timed at 195 seconds
+			// into a measured run. Launching the installer directly, the same
+			// pair completes in 35 seconds with no dialog at all.
+			if dir, err := os.MkdirTemp("", "madlyx-lyx"); err == nil {
+				defer os.RemoveAll(dir)
+				installer, derr := pkgmgr.WingetDownload(ctx, o.Runner, "LyX.LyX", dir, progress)
+				if derr != nil {
+					c.Log.Logf("winget download reported: %v", derr)
+				} else {
+					c.UI.Detail("running the LyX installer")
+					if _, rerr := o.Runner.RunWith(ctx,
+						pkgmgr.RunOpts{Env: []string{pkgmgr.RunAsInvoker}},
+						installer, "/CurrentUser", "/S"); rerr != nil {
+						// Exit 2 here usually means a previous machine-wide LyX
+						// left registry entries behind, so NSIS insists on an
+						// all-users install it cannot perform unelevated. The
+						// machine-wide retry below handles that, with a prompt.
+						c.Log.Logf("per-user LyX installer reported: %v", rerr)
+					}
+				}
 			}
 
 			c.UI.Detail("waiting for the installation to settle")

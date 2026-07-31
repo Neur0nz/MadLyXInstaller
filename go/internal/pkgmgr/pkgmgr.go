@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -178,6 +179,47 @@ func WingetInstallOpts(ctx context.Context, r Runner, id string, o WingetOpts) e
 	}
 	_, err := r.RunWith(ctx, RunOpts{OnLine: onLine, Env: o.Env}, "winget", args...)
 	return err
+}
+
+// WingetDownload fetches a package's installer without running it, returning
+// the path to the downloaded file.
+//
+// winget still resolves the version, picks the mirror and verifies the
+// published hash - all the things worth keeping - but hands us the file instead
+// of launching it. That matters because environment variables do not survive
+// the hop through winget to the installer it starts: setting RunAsInvoker on
+// winget left the UAC dialog exactly where it was, measured, twice. Running the
+// installer ourselves is what makes the shim apply.
+func WingetDownload(ctx context.Context, r Runner, id, dir string, progress func(string)) (string, error) {
+	var onLine func(string)
+	if progress != nil {
+		onLine = func(line string) {
+			if phase := wingetPhase(line); phase != "" {
+				progress(phase)
+			}
+		}
+	}
+	_, err := r.RunWith(ctx, RunOpts{OnLine: onLine}, "winget", "download",
+		"--id", id, "--exact",
+		"--accept-package-agreements", "--accept-source-agreements",
+		"--disable-interactivity", "-d", dir)
+	if err != nil {
+		return "", err
+	}
+
+	// Locate the result by looking rather than by parsing winget's prose: it
+	// also writes a .yaml manifest beside the installer, and the file name
+	// embeds a version we would otherwise have to predict.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ".exe") {
+			return filepath.Join(dir, e.Name()), nil
+		}
+	}
+	return "", fmt.Errorf("winget downloaded no installer into %s", dir)
 }
 
 // transferred matches winget's "41.2 MB / 57.6 MB" progress readout.
