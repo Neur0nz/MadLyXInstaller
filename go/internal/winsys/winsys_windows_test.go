@@ -5,40 +5,26 @@ package winsys
 import "testing"
 
 // These functions touch the real machine, so the tests assert only what can be
-// checked without changing anything: that reads succeed and are consistent.
-// The write paths are covered by the step-level tests and by CI's clean-runner
-// install, not here - a unit test that edits the registry would be worse than
-// no test.
-
-func TestLanguageToggleReadIsStable(t *testing.T) {
-	first, err := LanguageToggleDisabled()
-	if err != nil {
-		t.Fatalf("reading the toggle state failed: %v", err)
-	}
-	second, err := LanguageToggleDisabled()
-	if err != nil {
-		t.Fatalf("second read failed: %v", err)
-	}
-	if first != second {
-		t.Error("two consecutive reads disagreed; the check is not deterministic")
-	}
-}
-
-// A missing registry key means the Windows default (Alt+Shift active), not an
-// error. Getting this wrong would make the doctor report a fault on every
-// machine that has never changed the setting.
-func TestMissingKeyMeansEnabledNotError(t *testing.T) {
-	if _, err := LanguageToggleDisabled(); err != nil {
-		t.Errorf("absent or unreadable key should report enabled, not error: %v", err)
-	}
-}
+// checked without changing anything. The write paths are covered by the
+// step-level tests and by CI's clean-runner install, not here - a unit test
+// that edited Defender configuration would be worse than no test.
 
 func TestIsAdminDoesNotPanic(t *testing.T) {
 	_ = IsAdmin()
 }
 
-func TestHebrewInputCheckDoesNotPanic(t *testing.T) {
-	_ = HebrewInputInstalled()
+func TestDefenderExclusionsReadIsStable(t *testing.T) {
+	first, err := DefenderExclusions()
+	if err != nil {
+		t.Skip("Defender is unavailable or managed on this machine")
+	}
+	second, err := DefenderExclusions()
+	if err != nil {
+		t.Fatalf("second read failed: %v", err)
+	}
+	if len(first) != len(second) {
+		t.Error("two consecutive reads disagreed; the check is not deterministic")
+	}
 }
 
 // Elevation arguments must survive quoting, or a path with a space silently

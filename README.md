@@ -47,9 +47,13 @@ rather than recalled:
 LyX version, the five templates (wired into `Ctrl+Shift+N`), the macro files,
 and a shared preamble collecting the guide's LaTeX fixes.
 
-**Offers, asking each time** — disabling the Alt+Shift language switch (the
-guide's standing "keep Windows on ENG" instruction, p. 17, made enforceable) and
-Defender exclusions for the TeX tree.
+**Offers, asking first** — Defender exclusions for the TeX tree, which speed up
+compiling noticeably.
+
+> The installer does **not** touch your Windows keyboard shortcuts. The guide
+> advises keeping Windows on ENG *while typing in LyX* (p. 17), since LyX
+> supplies the Hebrew itself via F12 — but Alt+Shift is how you switch language
+> everywhere else, and disabling it system-wide would be a bad trade.
 
 **Verifies** by compiling a bundled Hebrew document to PDF. On failure it maps
 the error onto the guide's documented fix rather than saying "something went

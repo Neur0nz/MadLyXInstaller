@@ -28,7 +28,7 @@ func TestPlanIsWellFormed(t *testing.T) {
 
 func TestSkipFlagsRemoveTheRightSteps(t *testing.T) {
 	full := ids(Build(testOptions()))
-	if !contains2(full, "smoketest") || !contains2(full, "altshift") || !contains2(full, "defender") {
+	if !contains2(full, "smoketest") || !contains2(full, "defender") {
 		t.Fatalf("default plan is missing expected steps: %v", full)
 	}
 
@@ -36,7 +36,7 @@ func TestSkipFlagsRemoveTheRightSteps(t *testing.T) {
 	o.SkipSmokeTest = true
 	o.SkipSystemSteps = true
 	reduced := ids(Build(o))
-	for _, gone := range []string{"smoketest", "altshift", "defender"} {
+	for _, gone := range []string{"smoketest", "defender"} {
 		if contains2(reduced, gone) {
 			t.Errorf("%q should have been removed: %v", gone, reduced)
 		}
@@ -53,7 +53,7 @@ func TestSkipFlagsRemoveTheRightSteps(t *testing.T) {
 // there cannot abort an otherwise good install.
 func TestSystemStepsAreOptional(t *testing.T) {
 	for _, s := range Build(testOptions()).Steps {
-		if s.ID == "altshift" || s.ID == "defender" || s.ID == "culmus" || s.ID == "smoketest" {
+		if s.ID == "defender" || s.ID == "culmus" || s.ID == "smoketest" {
 			if !s.Optional {
 				t.Errorf("step %q should be Optional", s.ID)
 			}
@@ -75,7 +75,7 @@ func TestEveryStepHasACheck(t *testing.T) {
 
 // Steps that change the user's configuration should be reversible.
 func TestConfigStepsCanBeUndone(t *testing.T) {
-	want := map[string]bool{"settings": true, "altshift": true, "defender": true}
+	want := map[string]bool{"settings": true, "defender": true}
 	for _, s := range Build(testOptions()).Steps {
 		if want[s.ID] && s.Undo == nil {
 			t.Errorf("step %q changes configuration but has no Undo", s.ID)

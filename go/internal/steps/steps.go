@@ -50,7 +50,7 @@ func Build(o Options) *step.Plan {
 		macros(),
 	)
 	if !o.SkipSystemSteps {
-		p.Steps = append(p.Steps, languageToggle(), defenderExclusions())
+		p.Steps = append(p.Steps, defenderExclusions())
 	}
 	if !o.SkipSmokeTest {
 		p.Steps = append(p.Steps, smokeTest())

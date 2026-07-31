@@ -198,7 +198,7 @@ func runUninstall(g globalFlags) error {
 	u.Title("MadLyX Uninstall", version)
 	if !u.Confirm("Undo the changes MadLyX made?",
 		"Restores your previous LyX settings from the backups taken at install time\n"+
-			"and puts the Alt+Shift language switch back.\n\n"+
+			"and removes the Defender exclusions, if any were added.\n\n"+
 			"LyX and the TeX distribution are left installed - remove those with winget\n"+
 			"if you want them gone.", false) {
 		u.Info("nothing was changed")

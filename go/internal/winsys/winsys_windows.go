@@ -11,10 +11,7 @@ import (
 	"strings"
 
 	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
 )
-
-const toggleKey = `Keyboard Layout\Toggle`
 
 // IsAdmin reports whether the process holds the Administrators group.
 func IsAdmin() bool {
@@ -32,79 +29,6 @@ func IsAdmin() bool {
 	token := windows.Token(0) // the process token
 	member, err := token.IsMember(sid)
 	return err == nil && member
-}
-
-// LanguageToggleDisabled reports whether Alt+Shift still switches input
-// language. The MadLyX guide's standing instruction is that Windows must stay
-// on English, because LyX supplies the Hebrew itself through its keyboard map
-// and every shortcut breaks when Windows flips.
-func LanguageToggleDisabled() (bool, error) {
-	k, err := registry.OpenKey(registry.CURRENT_USER, toggleKey, registry.QUERY_VALUE)
-	if err != nil {
-		return false, nil // key absent means the Windows default, Alt+Shift
-	}
-	defer k.Close()
-	v, _, err := k.GetStringValue("Language Hotkey")
-	if err != nil {
-		return false, nil
-	}
-	return v == "3", nil
-}
-
-// DisableLanguageToggle stops Alt+Shift switching input language.
-//
-// The values are REG_SZ, not DWORD - writing DWORDs here is the common mistake
-// and Windows silently ignores them. "3" means not assigned. Per-user, no admin
-// needed, and reversible from Windows Settings. Win+Space still works, so
-// Hebrew stays reachable deliberately rather than by accident.
-func DisableLanguageToggle() error {
-	k, _, err := registry.CreateKey(registry.CURRENT_USER, toggleKey, registry.SET_VALUE)
-	if err != nil {
-		return err
-	}
-	defer k.Close()
-	for _, name := range []string{"Language Hotkey", "Layout Hotkey", "Hotkey"} {
-		if err := k.SetStringValue(name, "3"); err != nil {
-			return fmt.Errorf("setting %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// RestoreLanguageToggle puts the Windows defaults back.
-func RestoreLanguageToggle() error {
-	k, _, err := registry.CreateKey(registry.CURRENT_USER, toggleKey, registry.SET_VALUE)
-	if err != nil {
-		return err
-	}
-	defer k.Close()
-	defaults := map[string]string{"Language Hotkey": "1", "Layout Hotkey": "2", "Hotkey": "1"}
-	for name, v := range defaults {
-		if err := k.SetStringValue(name, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// HebrewInputInstalled reports whether a Hebrew keyboard layout is present,
-// so the Alt+Shift question can say whether it is precautionary.
-func HebrewInputInstalled() bool {
-	k, err := registry.OpenKey(registry.CURRENT_USER, `Keyboard Layout\Preload`, registry.QUERY_VALUE)
-	if err != nil {
-		return false
-	}
-	defer k.Close()
-	names, err := k.ReadValueNames(0)
-	if err != nil {
-		return false
-	}
-	for _, n := range names {
-		if v, _, err := k.GetStringValue(n); err == nil && strings.HasSuffix(strings.ToLower(v), "40d") {
-			return true // 040D is Hebrew
-		}
-	}
-	return false
 }
 
 // DefenderExclusions returns the current exclusion paths.

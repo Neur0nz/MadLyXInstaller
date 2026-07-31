@@ -16,52 +16,6 @@ import (
 	"github.com/Neur0nz/MadLyXInstaller/go/internal/winsys"
 )
 
-// languageToggle offers the highest-value change in the whole installer.
-//
-// The guide's standing instruction (p.17) is that Windows must stay on English,
-// because LyX types Hebrew through its own keyboard map and every shortcut
-// breaks when Windows flips. Alt+Shift is trivially easy to hit while reaching
-// for Alt-based shortcuts, so the instruction is easier to follow if the key
-// simply stops doing that.
-func languageToggle() *step.Step {
-	return &step.Step{
-		ID:       "altshift",
-		Name:     "Alt+Shift language switch",
-		Optional: true,
-		Check: func(c *step.Context) (step.State, error) {
-			off, err := winsys.LanguageToggleDisabled()
-			if err != nil {
-				return step.Unknown, err
-			}
-			if off {
-				return step.Satisfied, nil
-			}
-			return step.Pending, nil
-		},
-		Apply: func(c *step.Context) error {
-			detail := "Windows switches input language with Alt+Shift. LyX types Hebrew through\n" +
-				"its own keyboard map (F12), so Windows must stay on English - if it flips,\n" +
-				"every LyX shortcut stops working.\n\n" +
-				"Win+Space and the taskbar picker keep working, so Hebrew stays available.\n" +
-				"Reversible any time in Windows Settings."
-			if !winsys.HebrewInputInstalled() {
-				detail += "\n\nNo Hebrew input language is installed, so this is precautionary."
-			}
-			// Defaults to no: a piped or unattended run must never silently
-			// edit the registry.
-			if !c.UI.Confirm("Disable the Alt+Shift language switch?", detail, false) {
-				return fmt.Errorf("declined")
-			}
-			if err := winsys.DisableLanguageToggle(); err != nil {
-				return err
-			}
-			c.UI.Detail("takes effect for newly started programs; sign out to apply everywhere")
-			return nil
-		},
-		Undo: func(c *step.Context) error { return winsys.RestoreLanguageToggle() },
-	}
-}
-
 // defenderExclusions speeds up compiling. LaTeX creates and deletes many small
 // files per run, and MiKTeX writes thousands when installing packages.
 func defenderExclusions() *step.Step {
