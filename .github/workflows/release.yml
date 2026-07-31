@@ -17,7 +17,12 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # Windows, not Ubuntu. This is a Windows-only program: the registry,
+    # elevation and version-resource code lives in //go:build windows files, so
+    # a Linux runner cannot vet it and cannot run the tests at all. Building
+    # where the code actually runs means a release can never ship something
+    # whose tests were skipped.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -28,18 +33,16 @@ jobs:
       # go:embed cannot reach outside its package directory, so the payload is
       # staged at build time rather than duplicated in version control.
       - name: Stage payload
+        shell: bash
         run: cp -r payload go/internal/payload/data
 
-      - name: Test
+      - name: Vet and test
         working-directory: go
-        run: go vet ./... && go test ./...
+        run: go vet ./... ; if ($LASTEXITCODE) { throw "vet failed" } ; go test ./... ; if ($LASTEXITCODE) { throw "tests failed" }
 
       - name: Build
         working-directory: go
-        env:
-          GOOS: windows
-          GOARCH: amd64
-          CGO_ENABLED: '0'
+        shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME:-dev}"
           COMMIT="$(git rev-parse --short HEAD)"
@@ -48,15 +51,23 @@ jobs:
             -o ../madlyx.exe ./cmd/madlyx
 
       - name: Report artifact
+        shell: bash
         run: |
           ls -l madlyx.exe
           echo "sha256: $(sha256sum madlyx.exe | cut -d' ' -f1)"
+
+      # The released binary must actually run.
+      - name: Smoke-check the artifact
+        run: |
+          ./madlyx.exe --version
+          if ($LASTEXITCODE) { throw "the released binary does not run" }
 
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: madlyx.exe
 
       - name: Publish release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
