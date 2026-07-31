@@ -116,8 +116,11 @@ function Test-IsAdmin {
 
 function Test-HasHebrew {
     param([string]$Text)
-    # Hebrew block U+0590-U+05FF, plus the presentation forms block.
-    return $Text -match '[֐-׿יִ-ﭏ]'
+    # U+0590-U+05FF Hebrew, U+FB1D-U+FB4F Hebrew presentation forms.
+    # Written as \u escapes so this file stays pure ASCII: Windows PowerShell
+    # 5.1 reads a .ps1 with no byte-order mark using the system ANSI codepage,
+    # which would mangle literal Hebrew and make this silently detect nothing.
+    return $Text -match '[\u0590-\u05FF\uFB1D-\uFB4F]'
 }
 
 <#

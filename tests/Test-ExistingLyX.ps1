@@ -2,6 +2,11 @@
 #
 # Covers the "user already has LyX" path across every version series, including
 # ones that do not exist yet. Runs entirely in a sandbox: no LyX, no TeX needed.
+#
+# This file is deliberately pure ASCII. Windows PowerShell 5.1 reads a .ps1 with
+# no byte-order mark using the system ANSI codepage, so literal Hebrew here would
+# be corrupted before Test-HasHebrew ever saw it, and these assertions would be
+# testing a mangled string.
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -27,6 +32,10 @@ function New-FakeLyX([string]$ver) {
         Root = "C:\Program Files\LyX $series"; Exe = "C:\Program Files\LyX $series\bin\LyX.exe"
         Version = [version]$ver; Series = $series; UserDirName = "LyX$series"
     }
+}
+
+function New-HebrewString([int[]]$Codes) {
+    return (-join ($Codes | ForEach-Object { [char]$_ }))
 }
 
 $fakeTex = [pscustomobject]@{ Distro='miktex'; BinDir='C:\Program Files\MiKTeX\miktex\bin\x64' }
@@ -134,10 +143,17 @@ $fails += Check 'Hebrew profile path selects TeX Live' ($plan.Distro -eq 'texliv
 #  Hebrew detection
 # ---------------------------------------------------------------------------
 Write-Host "`n=== Hebrew path detection ===" -ForegroundColor Cyan
-$fails += Check 'detects Hebrew username'      (Test-HasHebrew 'C:\Users\נדב')
-$fails += Check 'detects Hebrew folder'        (Test-HasHebrew 'C:\Studies\אינפי\ex1')
+$hebName  = New-HebrewString @(0x05E0, 0x05D3, 0x05D1)                 # nadav
+$hebWord  = New-HebrewString @(0x05D0, 0x05D9, 0x05E0, 0x05E4, 0x05D9) # infi
+$hebFinal = New-HebrewString @(0x05EA, 0x05E8, 0x05D2, 0x05D9, 0x05DD) # targilim
+$accented = 'Jos' + [char]0x00E9                                       # Jose, acute e
+
+$fails += Check 'detects Hebrew username'      (Test-HasHebrew "C:\Users\$hebName")
+$fails += Check 'detects Hebrew folder'        (Test-HasHebrew "C:\Studies\$hebWord\ex1")
+$fails += Check 'detects Hebrew final letters' (Test-HasHebrew "D:\$hebFinal")
 $fails += Check 'passes clean ASCII path'      (-not (Test-HasHebrew 'C:\Users\nadav\Documents'))
-$fails += Check 'passes path with accents'     (-not (Test-HasHebrew 'C:\Users\José\Docs'))
+$fails += Check 'passes path with accents'     (-not (Test-HasHebrew "C:\Users\$accented\Docs"))
+$fails += Check 'passes empty string'          (-not (Test-HasHebrew ''))
 
 Write-Host ''
 if ($fails -eq 0) { Write-Host 'ALL CHECKS PASSED' -ForegroundColor Green }

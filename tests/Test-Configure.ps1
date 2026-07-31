@@ -68,7 +68,10 @@ $fails += Check 'gui_language now english' ([bool]($lines -match '^\\gui_languag
 $fails += Check 'kbmap now true'           ([bool]($lines -match '^\\kbmap true'))
 $fails += Check 'path uses forward slashes' ([bool]($lines -match 'path_prefix "C:/Program Files/MiKTeX'))
 $fails += Check 'backups created (3 runs)' (@(Get-ChildItem $userDir -Filter '*madlyx-backup*').Count -eq 3)
-$fails += Check 'no BOM' ((Get-Content (Join-Path $userDir 'preferences') -AsByteStream -TotalCount 3) -join ',' -ne '239,187,191')
+# -AsByteStream is PowerShell 7 only and -Encoding Byte is 5.1 only; .NET works on both.
+$headBytes = [IO.File]::ReadAllBytes((Join-Path $userDir 'preferences'))
+$hasBom = $headBytes.Length -ge 3 -and $headBytes[0] -eq 0xEF -and $headBytes[1] -eq 0xBB -and $headBytes[2] -eq 0xBF
+$fails += Check 'no BOM' (-not $hasBom)
 
 # 2.3 must get no colour overrides
 $lyx23 = [pscustomobject]@{ Root='x'; Exe='x'; Version=[version]'2.3.7'; Series='2.3'; UserDirName='LyX2.3' }

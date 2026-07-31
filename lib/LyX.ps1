@@ -35,7 +35,10 @@ function Find-LyXInstallation {
         if (-not $raw) { $raw = (Get-Item $exe).VersionInfo.FileVersion }
         $version = $null
         if ($raw -and ($raw -match '(\d+)\.(\d+)(\.(\d+))?')) {
-            $version = [version]("{0}.{1}.{2}" -f $Matches[1], $Matches[2], ($Matches[4] ?? '0'))
+            # Spelled out rather than using ?? : the null-coalescing operator is
+            # PowerShell 7 only, and this has to run under Windows PowerShell 5.1.
+            $patch = if ($Matches.ContainsKey(4) -and $Matches[4]) { $Matches[4] } else { '0' }
+            $version = [version]("{0}.{1}.{2}" -f $Matches[1], $Matches[2], $patch)
         }
 
         # Fall back to the folder name (LyX 2.4.4) when the binary has no version resource.
@@ -70,9 +73,11 @@ function Find-LyXUserDir {
         $exact = Join-Path $roaming $LyX.UserDirName
         if (Test-Path $exact) { return $exact }
     }
-    $found = Get-ChildItem $roaming -Directory -Filter 'LyX*' -ErrorAction SilentlyContinue |
-             Sort-Object Name -Descending | Select-Object -First 1
-    return $found?.FullName
+    $found = @(Get-ChildItem $roaming -Directory -Filter 'LyX*' -ErrorAction SilentlyContinue |
+               Sort-Object Name -Descending)
+    # Not $found?.FullName - null-conditional access is PowerShell 7 only.
+    if ($found.Count -gt 0) { return $found[0].FullName }
+    return $null
 }
 
 <#

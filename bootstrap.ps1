@@ -97,6 +97,32 @@ try {
     Get-ChildItem $extracted.FullName -Recurse -File -Include '*.ps1', '*.psm1' |
         ForEach-Object { try { Unblock-File $_.FullName } catch { } }
 
+    # Windows PowerShell 5.1 leaves CurrentUser and LocalMachine Undefined out of
+    # the box, which resolves to Restricted - no script may be loaded from disk at
+    # all. `irm | iex` itself still runs, because that is in-memory evaluation, so
+    # the failure only appears at the moment we invoke install.ps1.
+    #
+    # Process scope outranks CurrentUser and LocalMachine and lasts only for this
+    # process. It cannot override a Group Policy setting, but neither can passing
+    # -ExecutionPolicy on a command line, so this covers the same ground.
+    $policyBefore = Get-ExecutionPolicy
+    if ($policyBefore -in @('Restricted', 'AllSigned', 'Undefined')) {
+        Write-Host "  Execution policy is $policyBefore; allowing scripts for this process only..." -ForegroundColor Gray
+        try {
+            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction Stop
+        } catch {
+            $gp = Get-ExecutionPolicy -List |
+                  Where-Object { $_.Scope -in 'MachinePolicy', 'UserPolicy' -and $_.ExecutionPolicy -ne 'Undefined' }
+            if ($gp) {
+                throw ("PowerShell script execution is locked down by Group Policy " +
+                       "($($gp[0].Scope) = $($gp[0].ExecutionPolicy)). This cannot be " +
+                       "overridden from a script. Ask whoever manages this machine, or " +
+                       "install manually using the steps below.")
+            }
+            throw "Could not allow script execution for this process: $($_.Exception.Message)"
+        }
+    }
+
     Write-Host "  Running installer..." -ForegroundColor Gray
 
     $forward = @{}
