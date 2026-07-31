@@ -42,8 +42,11 @@ func defenderExclusions() *step.Step {
 			return step.Pending, nil
 		},
 		Apply: func(c *step.Context) error {
+			// The rest of the install deliberately runs without administrator
+			// rights, so this is the one step that can be out of reach. Say how
+			// to get it rather than just reporting that it failed.
 			if !winsys.IsAdmin() {
-				return fmt.Errorf("needs administrator rights")
+				return fmt.Errorf("needs administrator rights - re-run with --elevate if you want it")
 			}
 			t, _ := step.Get[winenv.TeX](c, keyTeX)
 			l, _ := step.Get[winenv.LyX](c, keyLyX)

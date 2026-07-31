@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -15,6 +17,9 @@ import (
 // the console. An interface so steps can be tested without running anything.
 type Runner interface {
 	Run(ctx context.Context, name string, args ...string) (string, error)
+	// RunStream is Run with a callback for each line as it arrives, so a
+	// command that takes minutes can say what it is doing while it does it.
+	RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, error)
 }
 
 // ExecRunner is the real implementation.
@@ -24,13 +29,25 @@ type ExecRunner struct {
 
 // Run executes a command with a deadline, returning combined output.
 func (r ExecRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	return r.RunStream(ctx, nil, name, args...)
+}
+
+// RunStream executes a command, reporting each output line as it appears.
+func (r ExecRunner) RunStream(ctx context.Context, onLine func(string), name string, args ...string) (string, error) {
 	if r.Log != nil {
 		r.Log("run: %s %s", name, strings.Join(args, " "))
 	}
 	cmd := exec.CommandContext(ctx, name, args...)
+
 	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	var sink io.Writer = &buf
+	if onLine != nil {
+		sink = io.MultiWriter(&buf, &lineWriter{emit: onLine})
+	}
+	cmd.Stdout = sink
+	cmd.Stderr = sink
+	hideConsole(cmd)
+
 	err := cmd.Run()
 	out := buf.String()
 	if r.Log != nil && out != "" {
@@ -40,6 +57,37 @@ func (r ExecRunner) Run(ctx context.Context, name string, args ...string) (strin
 		return out, fmt.Errorf("%s timed out", name)
 	}
 	return out, err
+}
+
+// lineWriter splits a stream into lines as it is written.
+//
+// It breaks on carriage returns as well as newlines: winget draws its download
+// progress by rewriting one line with \r, so a newline-only split yields a
+// single enormous line that only arrives once the download has finished -
+// exactly the moment the progress stops being useful.
+type lineWriter struct {
+	emit func(string)
+	buf  []byte
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexAny(w.buf, "\r\n")
+		if i < 0 {
+			break
+		}
+		if line := strings.TrimSpace(string(w.buf[:i])); line != "" {
+			w.emit(line)
+		}
+		w.buf = w.buf[i+1:]
+	}
+	// Keep the tail bounded: a command that never emits a break must not grow
+	// this without limit.
+	if len(w.buf) > 8192 {
+		w.buf = w.buf[len(w.buf)-1024:]
+	}
+	return len(p), nil
 }
 
 // Available reports whether a command is on PATH.
@@ -56,10 +104,60 @@ func Available(name string) bool {
 // packages. The accept flags matter too - on a machine that has never run
 // winget, the source-agreement prompt blocks forever.
 func WingetInstall(ctx context.Context, r Runner, id string) error {
-	_, err := r.Run(ctx, "winget", "install",
-		"--id", id, "--exact", "--silent",
-		"--accept-package-agreements", "--accept-source-agreements")
+	return WingetInstallProgress(ctx, r, id, nil, nil)
+}
+
+// WingetInstallProgress is WingetInstall that says what winget is doing, and
+// optionally passes extra switches through to the underlying installer.
+//
+// progress receives phrases like "downloading 41.2 MB of 57.6 MB" - LyX takes
+// minutes to install, and a motionless "installing LyX" is indistinguishable
+// from a hang. A real run sat on that line for the full 30-minute timeout.
+func WingetInstallProgress(ctx context.Context, r Runner, id string, custom []string, progress func(string)) error {
+	args := []string{"install", "--id", id, "--exact", "--silent",
+		"--accept-package-agreements", "--accept-source-agreements",
+		"--disable-interactivity"}
+	if len(custom) > 0 {
+		// --custom appends to the switches winget already passes, rather than
+		// replacing them as --override would.
+		args = append(args, "--custom", strings.Join(custom, " "))
+	}
+
+	var onLine func(string)
+	if progress != nil {
+		onLine = func(line string) {
+			if phase := wingetPhase(line); phase != "" {
+				progress(phase)
+			}
+		}
+	}
+	_, err := r.RunStream(ctx, onLine, "winget", args...)
 	return err
+}
+
+// transferred matches winget's "41.2 MB / 57.6 MB" progress readout.
+var transferred = regexp.MustCompile(`([\d.]+\s*[KMG]B)\s*/\s*([\d.]+\s*[KMG]B)`)
+
+// wingetPhase turns a line of winget output into something worth showing, or
+// "" for the noise. Translating rather than echoing keeps the display readable:
+// winget's raw output is full of progress-bar block characters and legal notices.
+func wingetPhase(line string) string {
+	if m := transferred.FindStringSubmatch(line); m != nil {
+		return fmt.Sprintf("downloading %s of %s", m[1], m[2])
+	}
+	switch {
+	case strings.Contains(line, "Successfully verified installer hash"):
+		return "verified the download"
+	case strings.Contains(line, "Starting package install"):
+		return "running the installer"
+	case strings.Contains(line, "Successfully installed"):
+		return "installed"
+	case strings.HasPrefix(line, "Downloading"):
+		return "downloading"
+	case strings.Contains(line, "Found "):
+		return "found it; starting"
+	}
+	return ""
 }
 
 // WingetUninstall removes a package by exact ID.

@@ -48,7 +48,14 @@ LyX version, the five templates (wired into `Ctrl+Shift+N`), the macro files,
 and a shared preamble collecting the guide's LaTeX fixes.
 
 **Offers, asking first** — Defender exclusions for the TeX tree, which speed up
-compiling noticeably.
+compiling noticeably. This is the only part that needs administrator rights, so
+it is opt-in via `--elevate`.
+
+> **No permission prompts.** MiKTeX and LyX are both installed for the current
+> user, so a normal run never shows a UAC dialog. LyX's installer supports this
+> through its `/CurrentUser` switch; it lands in `%LOCALAPPDATA%\Programs\LyX 2.4`
+> and writes only to `HKCU`. If that path fails on some machine the installer
+> retries the ordinary machine-wide install, which may ask for permission.
 
 > The installer does **not** touch your Windows keyboard shortcuts. The guide
 > advises keeping Windows on ENG *while typing in LyX* (p. 17), since LyX
@@ -76,7 +83,7 @@ madlyx uninstall       restore settings from backup, undo system changes
 | `--tex miktex\|texlive\|auto` | Override the distribution choice |
 | `--skip-test` | Skip the final Hebrew test compile |
 | `--skip-system` | LyX and TeX only; nothing outside them |
-| `--no-elevate` | Never offer to restart with administrator rights |
+| `--elevate` | Restart with administrator rights, enabling the Defender exclusions. Not needed otherwise: LyX and MiKTeX both install for the current user, so a normal run never asks for permission |
 
 ## Safe to re-run
 

@@ -94,6 +94,23 @@ jobs:
           $src | Invoke-Expression -ErrorAction Stop
           Write-Host "survived iex; LASTEXITCODE=$LASTEXITCODE"
 
+      # A PowerShell function returns whatever is left on its pipeline, so
+      # `$code = Invoke-MadLyxBootstrap ...` captured everything madlyx.exe
+      # printed. Every one-liner run looked silent: no banner, no steps, no
+      # summary. It also made stdout a pipe rather than a console, so the
+      # installer concluded it was unattended and stopped asking questions -
+      # which is why elevation was never offered and Defender exclusions failed
+      # with "needs administrator rights". Nothing in the Go code could have
+      # revealed this; only running the real bootstrap does.
+      - name: Bootstrap does not swallow the installer's output
+        shell: powershell
+        run: |
+          $out = & "$PWD\bootstrap.ps1" --version 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'madlyx version') {
+            throw "bootstrap.ps1 swallowed madlyx.exe's stdout - the one-liner would look silent"
+          }
+
   # The expensive one: a genuinely clean Windows runner, installing for real.
   # This is the only way to know the Hebrew smoke-test compile actually passes.
   install:

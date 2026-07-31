@@ -2,6 +2,7 @@ package step
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -16,12 +17,29 @@ type fakeUI struct {
 	infos   []string
 	answers map[string]bool
 	prompts []string
+	// details records who said what, which is what proves concurrent steps no
+	// longer overwrite one another's status.
+	details []string
+	overall [2]int
 }
 
 func (f *fakeUI) Section(string)            {}
 func (f *fakeUI) Begin(t string)            { f.mu.Lock(); defer f.mu.Unlock(); f.steps = append(f.steps, t) }
 func (f *fakeUI) Progress(string, int, int) {}
 func (f *fakeUI) Detail(string)             {}
+func (f *fakeUI) DetailFor(step, text string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.details = append(f.details, step+": "+text)
+}
+func (f *fakeUI) ProgressFor(step, text string, cur, total int) {
+	f.DetailFor(step, text)
+}
+func (f *fakeUI) Overall(done, total int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.overall = [2]int{done, total}
+}
 func (f *fakeUI) Skipped(s string, a ...any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -57,7 +75,6 @@ type fakeLog struct {
 	mu    sync.Mutex
 	lines []string
 }
-
 
 func (l *fakeLog) Logf(format string, a ...any) {
 	l.mu.Lock()
@@ -249,5 +266,65 @@ func TestContextCarriesDiscoveriesBetweenSteps(t *testing.T) {
 	}
 	if _, ok := Get[int](ctx, "lyx.root"); ok {
 		t.Error("Get should fail when the type does not match")
+	}
+}
+
+// Concurrent steps must each own their status line.
+//
+// Before per-step scoping there was one shared detail slot, so two steps
+// running at once overwrote each other continuously: a real install showed
+// "installing LyX" and "mathtools [7/35]" alternating on the same line, which
+// made the display actively misleading about what was happening.
+func TestConcurrentStepsReportSeparately(t *testing.T) {
+	// Both steps declare no dependencies, so the scheduler puts them in the
+	// same wave and they genuinely run at the same time.
+	bothStarted := make(chan struct{}, 2)
+	proceed := make(chan struct{})
+
+	report := func(text string) func(*Context) error {
+		return func(c *Context) error {
+			c.UI.Detail(text)
+			bothStarted <- struct{}{}
+			<-proceed
+			return nil
+		}
+	}
+	p := &Plan{Steps: []*Step{
+		mkStep("alpha", Pending, report("doing alpha things")),
+		mkStep("beta", Pending, report("doing beta things")),
+	}}
+
+	ctx, u := newCtx()
+	go func() {
+		<-bothStarted
+		<-bothStarted
+		close(proceed) // only release once both are inside Apply
+	}()
+	if _, err := p.Run(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := strings.Join(u.details, "\n")
+	for _, want := range []string{"alpha: doing alpha things", "beta: doing beta things"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("detail %q was not attributed to its step; got:\n%s", want, got)
+		}
+	}
+}
+
+// The display says "3/13 steps done", so the count has to reach the total and
+// never overshoot it - including when steps are skipped for a failed dependency.
+func TestOverallCountsEverySettledStep(t *testing.T) {
+	p := &Plan{Steps: []*Step{
+		mkStep("ok", Pending, func(*Context) error { return nil }),
+		mkStep("bad", Pending, func(*Context) error { return errNope }),
+		mkStep("downstream", Pending, func(*Context) error { return nil }, "bad"),
+	}}
+	ctx, u := newCtx()
+	if _, err := p.Run(ctx); err == nil {
+		t.Fatal("expected the failing step to be reported")
+	}
+	if want := [2]int{3, 3}; u.overall != want {
+		t.Errorf("overall = %v, want %v (every step settles, including the skipped one)", u.overall, want)
 	}
 }

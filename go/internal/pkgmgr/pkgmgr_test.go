@@ -10,10 +10,20 @@ import (
 type fakeRunner struct {
 	calls [][]string
 	fail  map[string]bool
+	emit  []string // lines handed to the progress callback
 }
 
-func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string, error) {
+func (f *fakeRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	return f.RunStream(ctx, nil, name, args...)
+}
+
+func (f *fakeRunner) RunStream(_ context.Context, onLine func(string), name string, args ...string) (string, error) {
 	f.calls = append(f.calls, append([]string{name}, args...))
+	if onLine != nil {
+		for _, l := range f.emit {
+			onLine(l)
+		}
+	}
 	for _, a := range args {
 		if f.fail[a] {
 			return "", errors.New("nope")
@@ -92,5 +102,62 @@ func TestContextCancellationStopsTheLoop(t *testing.T) {
 	cancel()
 	if err := InstallTeXPackages(ctx, r, "miktex", `C:\bin`, nil); err == nil {
 		t.Error("expected cancellation to be reported")
+	}
+}
+
+// winget's own output is unreadable as progress: legal notices, block
+// characters, and a download bar redrawn with carriage returns. Only the lines
+// that say something a user can act on should reach the display.
+func TestWingetProgressIsTranslatedNotEchoed(t *testing.T) {
+	r := &fakeRunner{emit: []string{
+		"Found LyX 2.4.4 [LyX.LyX]",
+		"This application is licensed to you by its owner.",
+		"Microsoft is not responsible for, nor does it grant any licenses to, third-party packages.",
+		"  ██████████████████████  41.2 MB / 57.6 MB",
+		"Successfully verified installer hash",
+		"Starting package install...",
+	}}
+	var seen []string
+	err := WingetInstallProgress(context.Background(), r, "LyX.LyX", nil,
+		func(p string) { seen = append(seen, p) })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	joined := strings.Join(seen, " | ")
+	for _, want := range []string{"downloading 41.2 MB of 57.6 MB", "verified the download", "running the installer"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in %q", want, joined)
+		}
+	}
+	for _, unwanted := range []string{"Microsoft is not responsible", "█", "licensed to you"} {
+		if strings.Contains(joined, unwanted) {
+			t.Errorf("noise %q reached the display: %q", unwanted, joined)
+		}
+	}
+}
+
+// winget rewrites its download line with \r. Splitting on newlines alone means
+// the whole download arrives as one line after it has already finished.
+func TestLineWriterBreaksOnCarriageReturns(t *testing.T) {
+	var got []string
+	w := &lineWriter{emit: func(s string) { got = append(got, s) }}
+	w.Write([]byte("10 MB / 57 MB\r20 MB / 57 MB\r"))
+	w.Write([]byte("30 MB / 57 MB\ndone\n"))
+
+	want := []string{"10 MB / 57 MB", "20 MB / 57 MB", "30 MB / 57 MB", "done"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+// A command that emits no line break at all must not grow the buffer forever.
+func TestLineWriterBoundsAnUnbrokenStream(t *testing.T) {
+	w := &lineWriter{emit: func(string) {}}
+	for i := 0; i < 100; i++ {
+		w.Write([]byte(strings.Repeat("x", 1000)))
+	}
+	if len(w.buf) > 8192 {
+		t.Errorf("buffer grew to %d bytes", len(w.buf))
 	}
 }

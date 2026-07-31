@@ -29,7 +29,7 @@ type globalFlags struct {
 	texDistro   string
 	skipSmoke   bool
 	skipSystem  bool
-	noElevate   bool
+	elevate     bool
 	verbose     bool
 }
 
@@ -54,7 +54,7 @@ func main() {
 	root.PersistentFlags().StringVar(&g.texDistro, "tex", "auto", "TeX distribution: auto, miktex or texlive")
 	root.PersistentFlags().BoolVar(&g.skipSmoke, "skip-test", false, "skip the final Hebrew test compile")
 	root.PersistentFlags().BoolVar(&g.skipSystem, "skip-system", false, "do not offer changes outside LyX")
-	root.PersistentFlags().BoolVar(&g.noElevate, "no-elevate", false, "never offer to restart with administrator rights")
+	root.PersistentFlags().BoolVar(&g.elevate, "elevate", false, "restart with administrator rights, enabling the Defender exclusions")
 	root.PersistentFlags().BoolVarP(&g.verbose, "verbose", "v", false, "log more detail")
 
 	root.AddCommand(&cobra.Command{
@@ -227,24 +227,22 @@ func reportEnvironment(u *ui.UI) {
 	}
 }
 
-// maybeElevate offers a restart with administrator rights.
+// maybeElevate restarts with administrator rights, but only when asked to.
+//
+// A normal install no longer needs them: MiKTeX and LyX both install for the
+// current user, so the whole setup runs without a single UAC prompt. The one
+// thing left that does need administrator rights is the Defender exclusions,
+// which are optional and only make compiling faster - not worth a mandatory
+// permission dialog, so it is opt-in via --elevate.
 //
 // Gated on being able to prompt: without a console there is nobody to accept
-// the UAC dialog, so offering it would hang rather than help.
+// the UAC dialog, so it would hang rather than help.
 func maybeElevate(g globalFlags, u *ui.UI) error {
-	if g.noElevate || g.dryRun || !u.CanPrompt() || isAdmin() {
+	if !g.elevate || g.dryRun || isAdmin() {
 		return nil
 	}
-	// Say what declining costs. LyX's installer requests elevation from its own
-	// manifest, so Windows asks either way - the only choice is whether that
-	// happens now, expected, or several minutes in, as a surprise.
-	ok := u.Confirm("Restart with administrator rights?",
-		"Recommended. Windows will ask for permission during the LyX install either\n"+
-			"way, because LyX installs for all users - accepting now gets it over with\n"+
-			"instead of interrupting you part-way through.\n\n"+
-			"Declining is fine. You will simply see the Windows prompt later, at the\n"+
-			"LyX step, and Defender exclusions (which speed up compiling) are skipped.", true)
-	if !ok {
+	if !u.CanPrompt() {
+		u.Warn("--elevate needs a terminal to accept the Windows prompt; continuing without it")
 		return nil
 	}
 	code, err := relaunchElevated(os.Args[1:])

@@ -13,15 +13,15 @@
 //     is piped, producing 29 carriage returns and out-of-order lines in a log
 //     file. All live rendering is gated on stdout being a terminal.
 //
-// Several steps run at once, so everything here is safe to call concurrently
-// and a single spinner reports all of them together.
+// Several steps run at once, so the live display gives each one its own line.
+// A single shared line was tried first and it lied: during a real install
+// "installing LyX" and "mathtools [7/35]" overwrote each other continuously.
 package ui
 
 import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -34,22 +34,45 @@ import (
 type Mode int
 
 const (
-	// Rich renders spinners and colour. Chosen when stdout is a terminal.
+	// Rich renders a live status block and colour. Chosen when stdout is a terminal.
 	Rich Mode = iota
 	// Plain emits one durable line per event: no colour, no redraws, no ANSI.
 	Plain
 )
+
+// redrawInterval is how often the live block is repainted. Fast enough that
+// the spinner reads as motion, slow enough to be invisible in CPU terms.
+const redrawInterval = 125 * time.Millisecond
+
+// spinnerFrames animate the header. Braille cells advance smoothly and occupy
+// one column in every terminal we target.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// task is one step currently running.
+type task struct {
+	started time.Time
+	detail  string
+}
 
 // UI carries terminal capabilities and the assumptions that follow from them.
 type UI struct {
 	mode      Mode
 	canPrompt bool
 	out       io.Writer
+	width     int
+	// paint gates the live redraw. Only a real terminal gets one: the area
+	// printer writes to the process's stdout rather than u.out, so leaving it
+	// on under test would scribble over the test runner's own output.
+	paint bool
 
 	mu      sync.Mutex
-	running map[string]time.Time // step name -> when it started
-	detail  string               // most recent activity from any running step
-	spin    *pterm.SpinnerPrinter
+	running map[string]*task
+	order   []string // display order: the order steps began
+	done    int
+	total   int
+	tick    int
+	area    *pterm.AreaPrinter
+	stop    chan struct{} // closed to end the redraw loop
 }
 
 // New inspects the real terminal state once. The answer cannot change during a
@@ -62,7 +85,12 @@ func New(assumeYes bool) *UI {
 	if stdoutTTY {
 		mode = Rich
 	}
-	return NewFor(os.Stdout, mode, stdoutTTY && stdinTTY && !assumeYes)
+	u := NewFor(os.Stdout, mode, stdoutTTY && stdinTTY && !assumeYes)
+	u.paint = stdoutTTY
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 20 {
+		u.width = w
+	}
+	return u
 }
 
 // NewFor builds a UI with the terminal state supplied rather than detected, so
@@ -72,7 +100,13 @@ func NewFor(out io.Writer, mode Mode, canPrompt bool) *UI {
 		pterm.DisableColor()
 		pterm.DisableStyling()
 	}
-	return &UI{mode: mode, canPrompt: canPrompt, out: out, running: map[string]time.Time{}}
+	return &UI{
+		mode:      mode,
+		canPrompt: canPrompt,
+		out:       out,
+		width:     100,
+		running:   map[string]*task{},
+	}
 }
 
 // CanPrompt reports whether asking the user a question can actually work.
@@ -96,41 +130,55 @@ func (u *UI) Title(name, version string) {
 // Section starts a named phase of work.
 func (u *UI) Section(title string) {
 	u.mu.Lock()
-	u.stopSpinnerLocked()
+	u.clearLocked()
 	u.mu.Unlock()
 	if u.mode == Plain {
 		fmt.Fprintf(u.out, "\n== %s\n", title)
 		return
 	}
 	pterm.DefaultSection.Println(title)
+	u.mu.Lock()
+	u.renderLocked()
+	u.mu.Unlock()
+}
+
+// Overall records how much of the plan has settled.
+func (u *UI) Overall(done, total int) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.done, u.total = done, total
+	u.renderLocked()
 }
 
 // Begin announces that a step has started. Several may be active at once.
 func (u *UI) Begin(step string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.running[step] = time.Now()
-	u.detail = ""
+	if _, seen := u.running[step]; !seen {
+		u.order = append(u.order, step)
+	}
+	u.running[step] = &task{started: time.Now()}
 
 	if u.mode == Plain {
 		fmt.Fprintf(u.out, "-> %s\n", step)
 		return
 	}
-	u.refreshLocked()
+	u.startLoopLocked()
+	u.renderLocked()
 }
 
 // End reports that a step finished. ok=false renders it as a failure.
 func (u *UI) End(step string, ok bool, msg string) {
 	u.mu.Lock()
-	started, wasRunning := u.running[step]
-	delete(u.running, step)
+	t, wasRunning := u.running[step]
 	elapsed := ""
 	if wasRunning {
-		elapsed = " " + humanDuration(time.Since(started))
+		elapsed = " " + humanDuration(time.Since(t.started))
 	}
-	// Stop the shared spinner before printing, so the completion line is not
-	// overwritten by the next redraw.
-	u.stopSpinnerLocked()
+	u.forgetLocked(step)
+	// Erase the live block before printing, so the completion line is not
+	// overwritten by the next repaint.
+	u.clearLocked()
 	u.mu.Unlock()
 
 	line := msg
@@ -148,67 +196,77 @@ func (u *UI) End(step string, ok bool, msg string) {
 		pterm.Error.Println(line)
 	}
 
-	// Anything still running keeps its spinner.
+	// Anything still running keeps its line.
 	u.mu.Lock()
-	u.refreshLocked()
+	u.renderLocked()
 	u.mu.Unlock()
 }
 
 // Skipped reports a step that needed no work.
 func (u *UI) Skipped(format string, a ...any) {
+	u.durable(func(msg string) { pterm.Info.Println(msg) }, "   skip: %s\n", format, a...)
+}
+
+// Warn reports something the user should know that is not fatal.
+func (u *UI) Warn(format string, a ...any) {
+	u.durable(func(msg string) { pterm.Warning.Println(msg) }, "   warn: %s\n", format, a...)
+}
+
+// durable prints a line that stays on screen, around the live block.
+func (u *UI) durable(rich func(string), plainFormat, format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
 	u.mu.Lock()
-	u.stopSpinnerLocked()
+	u.clearLocked()
 	u.mu.Unlock()
 	if u.mode == Plain {
-		fmt.Fprintf(u.out, "   skip: %s\n", msg)
+		fmt.Fprintf(u.out, plainFormat, msg)
 	} else {
-		pterm.Info.Println(msg)
+		rich(msg)
 	}
 	u.mu.Lock()
-	u.refreshLocked()
+	u.renderLocked()
 	u.mu.Unlock()
 }
 
 // Progress reports position within a step, e.g. package 7 of 24.
 func (u *UI) Progress(text string, current, total int) {
-	if u.mode == Plain {
-		// One durable line per item rather than a redrawn bar.
-		fmt.Fprintf(u.out, "   [%d/%d] %s\n", current, total, text)
-		return
-	}
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.detail = fmt.Sprintf("%s [%d/%d]", text, current, total)
-	u.refreshLocked()
+	u.ProgressFor(u.soleRunner(), text, current, total)
 }
 
 // Detail updates the current activity without changing position.
-func (u *UI) Detail(text string) {
+func (u *UI) Detail(text string) { u.DetailFor(u.soleRunner(), text) }
+
+// ProgressFor is Progress attributed to a named step.
+func (u *UI) ProgressFor(step, text string, current, total int) {
+	u.DetailFor(step, fmt.Sprintf("%s [%d/%d]", text, current, total))
+}
+
+// DetailFor is Detail attributed to a named step.
+func (u *UI) DetailFor(step, text string) {
 	if u.mode == Plain {
+		// One durable line per event rather than a redrawn block.
 		fmt.Fprintf(u.out, "   %s\n", text)
 		return
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	u.detail = text
-	u.refreshLocked()
+	if t, ok := u.running[step]; ok {
+		t.detail = text
+		u.renderLocked()
+	}
 }
 
-// Warn reports something the user should know that is not fatal.
-func (u *UI) Warn(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
+// soleRunner names the running step when there is exactly one, so the
+// unattributed Detail and Progress still land somewhere sensible. With several
+// running there is no honest answer, and guessing is what produced the
+// contradictory status line this display replaced.
+func (u *UI) soleRunner() string {
 	u.mu.Lock()
-	u.stopSpinnerLocked()
-	u.mu.Unlock()
-	if u.mode == Plain {
-		fmt.Fprintf(u.out, "   warn: %s\n", msg)
-	} else {
-		pterm.Warning.Println(msg)
+	defer u.mu.Unlock()
+	if len(u.order) == 1 {
+		return u.order[0]
 	}
-	u.mu.Lock()
-	u.refreshLocked()
-	u.mu.Unlock()
+	return ""
 }
 
 // Fail reports a failure.
@@ -224,48 +282,131 @@ func (u *UI) Info(format string, a ...any) {
 		fmt.Fprintf(u.out, "   %s\n", msg)
 		return
 	}
-	fmt.Fprintf(u.out, "   %s\n", pterm.Gray(msg))
+	u.durable(func(m string) { fmt.Fprintf(u.out, "   %s\n", pterm.Gray(m)) }, "   %s\n", "%s", msg)
 }
 
-// refreshLocked redraws the shared spinner for whatever is currently running.
-// Callers must hold u.mu.
-func (u *UI) refreshLocked() {
+// startLoopLocked begins repainting so elapsed times advance and the spinner
+// turns even while a step sits inside a ten-minute winget call.
+func (u *UI) startLoopLocked() {
+	if u.stop != nil {
+		return
+	}
+	stop := make(chan struct{})
+	u.stop = stop
+	go func() {
+		ticker := time.NewTicker(redrawInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				u.mu.Lock()
+				u.tick++
+				u.renderLocked()
+				u.mu.Unlock()
+			}
+		}
+	}()
+}
+
+// forgetLocked removes a finished step, stopping the repaint loop when the
+// last one goes. Callers must hold u.mu.
+func (u *UI) forgetLocked(step string) {
+	delete(u.running, step)
+	for i, n := range u.order {
+		if n == step {
+			u.order = append(u.order[:i], u.order[i+1:]...)
+			break
+		}
+	}
+	if len(u.order) == 0 && u.stop != nil {
+		close(u.stop)
+		u.stop = nil
+	}
+}
+
+// renderLocked repaints the live block. Callers must hold u.mu.
+func (u *UI) renderLocked() {
 	if u.mode != Rich {
 		return
 	}
-	if len(u.running) == 0 {
-		u.stopSpinnerLocked()
+	if len(u.order) == 0 {
+		u.clearLocked()
 		return
 	}
-
-	names := make([]string, 0, len(u.running))
-	oldest := time.Now()
-	for n, t := range u.running {
-		names = append(names, n)
-		if t.Before(oldest) {
-			oldest = t
+	if !u.paint {
+		return
+	}
+	if u.area == nil {
+		a, err := pterm.DefaultArea.WithRemoveWhenDone(true).Start()
+		if err != nil {
+			return
 		}
+		u.area = a
 	}
-	sort.Strings(names)
-
-	text := strings.Join(names, ", ")
-	if u.detail != "" {
-		text += " - " + u.detail
-	}
-	text += "  " + humanDuration(time.Since(oldest))
-
-	if u.spin == nil {
-		u.spin, _ = pterm.DefaultSpinner.WithRemoveWhenDone(true).Start(text)
-		return
-	}
-	u.spin.UpdateText(text)
+	u.area.Update(u.frameLocked())
 }
 
-func (u *UI) stopSpinnerLocked() {
-	if u.spin != nil {
-		_ = u.spin.Stop()
-		u.spin = nil
+// clearLocked erases the live block. Callers must hold u.mu.
+func (u *UI) clearLocked() {
+	if u.area != nil {
+		_ = u.area.Stop()
+		u.area = nil
 	}
+}
+
+// frameLocked composes the block: a header with overall position, then one
+// line per running step. Callers must hold u.mu.
+func (u *UI) frameLocked() string {
+	glyph := spinnerFrames[u.tick%len(spinnerFrames)]
+	head := fmt.Sprintf("%s  %d/%d steps done", glyph, u.done, u.total)
+	if len(u.order) > 1 {
+		head += fmt.Sprintf("  ·  %d running", len(u.order))
+	}
+
+	nameWidth := 0
+	for _, n := range u.order {
+		if len(n) > nameWidth {
+			nameWidth = len(n)
+		}
+	}
+	if nameWidth > 26 {
+		nameWidth = 26
+	}
+
+	var b strings.Builder
+	b.WriteString(pterm.Cyan(head))
+	for _, n := range u.order {
+		t := u.running[n]
+		elapsed := humanDuration(time.Since(t.started))
+		name := fit(n, nameWidth)
+
+		// Compose in plain text so the width arithmetic is not thrown off by
+		// the escape sequences colour adds.
+		fixed := 3 + nameWidth + 2 + 2 + len(elapsed)
+		detail := fit(t.detail, u.width-fixed-1)
+
+		b.WriteString("\n   " + name + "  " + pterm.Gray(detail))
+		b.WriteString(strings.Repeat(" ", 2) + pterm.Gray(elapsed))
+	}
+	return b.String()
+}
+
+// fit pads or truncates to exactly n columns, so columns line up and a long
+// detail string can never wrap and desynchronise the redraw.
+func fit(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) > n {
+		if n <= 1 {
+			return string(r[:n])
+		}
+		return string(r[:n-1]) + "…"
+	}
+	return s + strings.Repeat(" ", n-len(r))
 }
 
 func humanDuration(d time.Duration) string {
@@ -295,10 +436,10 @@ func (u *UI) Confirm(question, detail string, def bool) bool {
 		return def
 	}
 
-	// Steps that prompt never run alongside others, so the spinner can be
-	// stopped outright rather than restored afterwards.
+	// Steps that prompt never run alongside others, so the block can be erased
+	// outright rather than restored afterwards.
 	u.mu.Lock()
-	u.stopSpinnerLocked()
+	u.clearLocked()
 	u.mu.Unlock()
 
 	fmt.Fprintln(u.out)
@@ -343,7 +484,7 @@ func (u *UI) Confirm(question, detail string, def bool) bool {
 // Summary prints the closing report as a table in Rich mode.
 func (u *UI) Summary(rows [][]string) {
 	u.mu.Lock()
-	u.stopSpinnerLocked()
+	u.clearLocked()
 	u.mu.Unlock()
 	fmt.Fprintln(u.out)
 	if u.mode == Plain {

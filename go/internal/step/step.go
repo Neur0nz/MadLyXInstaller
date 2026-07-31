@@ -47,23 +47,62 @@ func (s State) String() string {
 // The PowerShell version had six ambient $script: variables, one of which threw
 // under StrictMode when a module was loaded on its own.
 //
-// State is guarded by a mutex because independent steps run concurrently.
+// Each step runs with its own Context whose UI is scoped to that step; they all
+// point at the same discoveries. Sharing through a pointer rather than by value
+// is what lets the per-step copies exist without duplicating the state or the
+// lock that guards it.
 type Context struct {
 	UI      Reporter
 	Log     Logger
 	DryRun  bool
 	Verbose bool
 
-	mu    sync.RWMutex
-	state map[string]any // discoveries shared between steps, e.g. the LyX install
+	initMu sync.Mutex
+	shared *sharedState
+}
+
+// sharedState holds the discoveries steps pass to one another, e.g. where LyX
+// turned out to be. Guarded because independent steps run concurrently.
+type sharedState struct {
+	mu sync.RWMutex
+	m  map[string]any
+}
+
+// state returns the shared map, creating it on first use. Only ever called on
+// the root Context - the per-step copies are handed the pointer directly - but
+// concurrent steps reach it at the same time, hence the lock.
+func (c *Context) state() *sharedState {
+	c.initMu.Lock()
+	defer c.initMu.Unlock()
+	if c.shared == nil {
+		c.shared = &sharedState{m: map[string]any{}}
+	}
+	return c.shared
+}
+
+// forStep derives the Context a single step runs with: the same discoveries,
+// but a UI that attributes Detail and Progress to this step by name.
+//
+// Without this, concurrent steps overwrote one another's status text - during a
+// real run "installing LyX" and "mathtools [7/35]" fought over one line, so the
+// display contradicted itself every few hundred milliseconds.
+func (c *Context) forStep(name string) *Context {
+	return &Context{
+		UI:      stepView{Reporter: c.UI, name: name},
+		Log:     c.Log,
+		DryRun:  c.DryRun,
+		Verbose: c.Verbose,
+		shared:  c.state(),
+	}
 }
 
 // Get retrieves a value another step recorded, with the type asserted.
 func Get[T any](c *Context, key string) (T, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	s := c.state()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	var zero T
-	v, ok := c.state[key]
+	v, ok := s.m[key]
 	if !ok {
 		return zero, false
 	}
@@ -73,12 +112,10 @@ func Get[T any](c *Context, key string) (T, bool) {
 
 // Set records a discovery for later steps.
 func (c *Context) Set(key string, value any) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.state == nil {
-		c.state = map[string]any{}
-	}
-	c.state[key] = value
+	s := c.state()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[key] = value
 }
 
 // Reporter is the subset of the ui package that steps are allowed to use.
@@ -89,13 +126,34 @@ type Reporter interface {
 	// the step's name rather than relying on there being only one.
 	Begin(step string)
 	End(step string, ok bool, msg string)
-	Progress(text string, current, total int)
+	// Detail and Progress report what a step is doing. Steps call the unnamed
+	// forms through the scoped Context they are given; the *For variants carry
+	// the attribution the display needs when several steps are running.
 	Detail(text string)
+	Progress(text string, current, total int)
+	DetailFor(step, text string)
+	ProgressFor(step, text string, current, total int)
+	// Overall reports how much of the plan has settled, so the display can say
+	// "3 of 13" rather than only naming what happens to be running.
+	Overall(done, total int)
 	Skipped(format string, a ...any)
 	Warn(format string, a ...any)
 	Info(format string, a ...any)
 	Confirm(question, detail string, def bool) bool
 	CanPrompt() bool
+}
+
+// stepView is a Reporter that knows which step is talking. Embedding the
+// Reporter means only the two methods that need attribution are overridden.
+type stepView struct {
+	Reporter
+	name string
+}
+
+func (v stepView) Detail(text string) { v.Reporter.DetailFor(v.name, text) }
+
+func (v stepView) Progress(text string, current, total int) {
+	v.Reporter.ProgressFor(v.name, text, current, total)
 }
 
 // Logger writes the durable record. Separate from Reporter so that what the
@@ -226,6 +284,10 @@ func (p *Plan) Run(ctx *Context) ([]Result, error) {
 	byID := map[string]*Result{}
 	succeeded := map[string]bool{}
 
+	settled := 0
+	total := len(p.Steps)
+	ctx.UI.Overall(settled, total)
+
 	for _, wave := range p.Waves() {
 		// Steps whose prerequisites failed are settled without running.
 		var runnable []*Step
@@ -238,6 +300,8 @@ func (p *Plan) Run(ctx *Context) ([]Result, error) {
 				}
 				ctx.Log.Logf("step %s skipped: needs %s", s.ID, missing)
 				ctx.UI.Skipped("%s - skipped, %s did not succeed", s.Name, missing)
+				settled++
+				ctx.UI.Overall(settled, total)
 				continue
 			}
 			runnable = append(runnable, s)
@@ -288,7 +352,9 @@ func (p *Plan) Run(ctx *Context) ([]Result, error) {
 			if r.Err == nil {
 				succeeded[r.Step.ID] = true
 			}
+			settled++
 		}
+		ctx.UI.Overall(settled, total)
 	}
 
 	// Report in declaration order regardless of completion order.
@@ -309,7 +375,11 @@ func (p *Plan) Run(ctx *Context) ([]Result, error) {
 
 // runOne executes a single step and reports on it. Safe to call concurrently;
 // the UI serialises its own writes.
-func runOne(ctx *Context, s *Step) *Result {
+//
+// The step sees a Context scoped to itself, so anything it reports is labelled
+// with its name even when other steps are reporting at the same time.
+func runOne(root *Context, s *Step) *Result {
+	ctx := root.forStep(s.Name)
 	res := &Result{Step: s}
 	start := time.Now()
 

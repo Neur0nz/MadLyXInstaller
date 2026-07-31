@@ -99,7 +99,8 @@ func texDistribution(o Options) *step.Step {
 				// default precisely because it can install packages on demand.
 				return fmt.Errorf("TeX Live must be installed manually from https://tug.org/texlive/")
 			}
-			if err := pkgmgr.WingetInstall(ctx, o.Runner, id); err != nil {
+			if err := pkgmgr.WingetInstallProgress(ctx, o.Runner, id, nil,
+				func(phase string) { c.UI.Detail(phase) }); err != nil {
 				c.Log.Logf("winget reported: %v", err)
 			}
 
@@ -151,36 +152,53 @@ func lyxInstall(o Options) *step.Step {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
 
-			// LyX installs machine-wide, so winget elevates itself. Say so
-			// first: an unannounced UAC dialog part-way through an install is
-			// exactly the kind of surprise that makes people distrust it.
-			if !isElevated() {
-				c.UI.Detail("Windows will ask for permission - LyX installs for all users")
-			}
+			progress := func(phase string) { c.UI.Detail(phase) }
 			c.UI.Detail("installing LyX")
 
-			// A real run sat here for exactly the 30-minute timeout because
-			// winget was blocked on a UAC dialog behind another window. Nothing
-			// distinguished that from a slow download, so say what to look for
-			// rather than leaving a spinner turning for half an hour.
-			if !isElevated() {
-				done := make(chan struct{})
-				defer close(done)
-				go func() {
-					select {
-					case <-time.After(90 * time.Second):
-						c.UI.Detail("still installing - if Windows asked for permission, " +
-							"the prompt may be waiting behind this window")
-					case <-done:
-					}
-				}()
-			}
+			// Install for this user only, which needs no administrator rights.
+			//
+			// LyX's installer is built with MULTIUSER_INSTALLMODE_COMMANDLINE
+			// defined, so it accepts /CurrentUser; in that mode it writes to
+			// %LOCALAPPDATA%\Programs and HKCU and nothing else. Measured on a
+			// clean machine from an unelevated shell: 41 seconds, exit 0, no UAC
+			// dialog. MiKTeX already installs per-user, so this is what makes a
+			// complete setup possible without a single elevation prompt - which
+			// matters because the previous machine-wide install produced a UAC
+			// dialog that could open behind another window, where it once
+			// blocked the run for the full 30-minute timeout.
+			//
+			// A watchdog still covers the case where something does put a dialog
+			// in front of the user.
+			done := make(chan struct{})
+			defer close(done)
+			go func() {
+				select {
+				case <-time.After(2 * time.Minute):
+					c.UI.Detail("still working - if Windows asked for permission, " +
+						"the prompt may be waiting behind this window")
+				case <-done:
+				}
+			}()
 
-			if err := pkgmgr.WingetInstall(ctx, o.Runner, "LyX.LyX"); err != nil {
-				c.Log.Logf("winget reported: %v", err)
+			if err := pkgmgr.WingetInstallProgress(ctx, o.Runner, "LyX.LyX",
+				[]string{"/CurrentUser"}, progress); err != nil {
+				c.Log.Logf("winget (per-user) reported: %v", err)
 			}
 
 			c.UI.Detail("waiting for the installation to settle")
+			if l, ok := winenv.WaitFor(3*time.Minute, 2*time.Second, winenv.FindLyX); ok {
+				c.Set(keyLyX, l)
+				return nil
+			}
+
+			// Fall back to whatever the installer does by default. This may ask
+			// for permission, which is worse than not asking but far better than
+			// failing outright on a machine where the per-user path did not work.
+			c.Log.Logf("per-user install did not produce a LyX; retrying machine-wide")
+			c.UI.Detail("retrying - Windows may ask for permission")
+			if err := pkgmgr.WingetInstallProgress(ctx, o.Runner, "LyX.LyX", nil, progress); err != nil {
+				c.Log.Logf("winget reported: %v", err)
+			}
 			if l, ok := winenv.WaitFor(3*time.Minute, 2*time.Second, winenv.FindLyX); ok {
 				c.Set(keyLyX, l)
 				return nil

@@ -84,8 +84,23 @@ function Invoke-MadLyxBootstrap {
         try { Unblock-File $exe } catch { }
 
         Write-Host ''
+
+        # Deliberately not captured, piped, or returned.
+        #
+        # PowerShell only redirects a native command's stdout when something
+        # consumes it - and `$code = Invoke-MadLyxBootstrap ...` consumed it,
+        # because a function returns everything left on its pipeline. That one
+        # assignment swallowed every line madlyx.exe printed: no banner, no
+        # steps, no summary. Worse, it made stdout a pipe rather than a
+        # console, so the installer correctly concluded it was running
+        # unattended and stopped asking questions - which is why the elevation
+        # prompt never appeared and Defender exclusions silently failed with
+        # "needs administrator rights".
+        #
+        # Left bare, the process inherits the real console: output is visible,
+        # colour and the live progress display work, and prompts can be
+        # answered. The exit code comes from $LASTEXITCODE, which & sets.
         & $exe @Arguments
-        return $LASTEXITCODE
     }
     catch {
         Write-Host ''
@@ -95,7 +110,7 @@ function Invoke-MadLyxBootstrap {
         Write-Host "    1. Download madlyx.exe from https://github.com/$Repo/releases/latest" -ForegroundColor Gray
         Write-Host '    2. Run it from a terminal' -ForegroundColor Gray
         Write-Host ''
-        return 1
+        $global:LASTEXITCODE = 1
     }
     finally {
         if ($KeepFiles) {
@@ -106,7 +121,9 @@ function Invoke-MadLyxBootstrap {
     }
 }
 
-$code = Invoke-MadLyxBootstrap -Repo $Repo -Version $Version -Arguments $Arguments -KeepFiles:$KeepFiles
+Invoke-MadLyxBootstrap -Repo $Repo -Version $Version -Arguments $Arguments -KeepFiles:$KeepFiles
+$code = $LASTEXITCODE
+if ($null -eq $code) { $code = 0 }
 $global:LASTEXITCODE = $code
 
 # Only terminate the host when running as a real script file. Under `irm | iex`
