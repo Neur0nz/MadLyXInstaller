@@ -26,3 +26,7 @@ madlyx-v*.exe
 
 # session state
 .claude/
+
+# scratch from local test runs
+go/out.txt
+go/err.txt
