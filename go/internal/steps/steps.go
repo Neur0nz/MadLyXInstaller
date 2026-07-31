@@ -150,6 +150,12 @@ func lyxInstall(o Options) *step.Step {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 			defer cancel()
 
+			// LyX installs machine-wide, so winget elevates itself. Say so
+			// first: an unannounced UAC dialog part-way through an install is
+			// exactly the kind of surprise that makes people distrust it.
+			if !isElevated() {
+				c.UI.Detail("Windows will ask for permission - LyX installs for all users")
+			}
 			c.UI.Detail("installing LyX")
 			if err := pkgmgr.WingetInstall(ctx, o.Runner, "LyX.LyX"); err != nil {
 				c.Log.Logf("winget reported: %v", err)
