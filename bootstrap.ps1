@@ -32,6 +32,7 @@ param(
     [ValidateSet('auto', 'miktex', 'texlive')][string]$TeXDistribution = 'auto',
     [switch]$SkipSmokeTest,
     [switch]$SkipSystemTweaks,
+    [switch]$NoElevate,
 
     # Keep the downloaded copy instead of deleting it afterwards.
     [switch]$KeepFiles
@@ -52,7 +53,7 @@ try {
 # watching the install in.
 function Invoke-MadLyxBootstrap {
     param($Repo, $Branch, $Doctor, $Unattended, $TeXDistribution,
-          $SkipSmokeTest, $SkipSystemTweaks, $KeepFiles)
+          $SkipSmokeTest, $SkipSystemTweaks, $NoElevate, $KeepFiles)
 
 Write-Host ''
 Write-Host '  MadLyX Installer - bootstrap' -ForegroundColor Cyan
@@ -103,6 +104,7 @@ try {
     if ($Unattended)       { $forward['Unattended']       = $true }
     if ($SkipSmokeTest)    { $forward['SkipSmokeTest']    = $true }
     if ($SkipSystemTweaks) { $forward['SkipSystemTweaks'] = $true }
+    if ($NoElevate)        { $forward['NoElevate']        = $true }
     if ($TeXDistribution -ne 'auto') { $forward['TeXDistribution'] = $TeXDistribution }
 
     & $installer @forward
@@ -132,7 +134,8 @@ finally {
 
 $code = Invoke-MadLyxBootstrap -Repo $Repo -Branch $Branch -Doctor $Doctor `
     -Unattended $Unattended -TeXDistribution $TeXDistribution `
-    -SkipSmokeTest $SkipSmokeTest -SkipSystemTweaks $SkipSystemTweaks -KeepFiles $KeepFiles
+    -SkipSmokeTest $SkipSmokeTest -SkipSystemTweaks $SkipSystemTweaks `
+    -NoElevate $NoElevate -KeepFiles $KeepFiles
 
 $global:LASTEXITCODE = $code
 
