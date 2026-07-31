@@ -1,0 +1,66 @@
+name: release
+
+# Builds madlyx.exe and publishes it with SLSA build provenance, so anyone can
+# verify the binary was built by this workflow from this commit:
+#
+#   gh attestation verify madlyx.exe --repo Neur0nz/MadLyXInstaller
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write      # create the release
+  id-token: write      # Sigstore signing
+  attestations: write  # record the attestation
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      # go:embed cannot reach outside its package directory, so the payload is
+      # staged at build time rather than duplicated in version control.
+      - name: Stage payload
+        run: cp -r payload go/internal/payload/data
+
+      - name: Test
+        working-directory: go
+        run: go vet ./... && go test ./...
+
+      - name: Build
+        working-directory: go
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: |
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          go build -trimpath \
+            -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+            -o ../madlyx.exe ./cmd/madlyx
+
+      - name: Report artifact
+        run: |
+          ls -l madlyx.exe
+          echo "sha256: $(sha256sum madlyx.exe | cut -d' ' -f1)"
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: madlyx.exe
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" madlyx.exe \
+            --title "MadLyX ${GITHUB_REF_NAME}" \
+            --generate-notes \
+          || gh release upload "${GITHUB_REF_NAME}" madlyx.exe --clobber

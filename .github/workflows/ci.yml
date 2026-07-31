@@ -1,0 +1,104 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Fast feedback: vet and the unit tests, which need neither LyX nor TeX.
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Stage payload
+        shell: bash
+        run: cp -r payload go/internal/payload/data
+
+      - name: Vet
+        working-directory: go
+        run: go vet ./...
+
+      - name: Test
+        working-directory: go
+        run: go test ./... -v
+
+      - name: Build
+        working-directory: go
+        run: go build -trimpath -o madlyx.exe ./cmd/madlyx
+
+      # The payload must ship byte-identical to what Kali published.
+      # .gitattributes marks payload/** as -text; this proves it held.
+      - name: Verify payload was not rewritten
+        shell: bash
+        working-directory: go
+        run: |
+          set -e
+          expect_bind23=38651
+          actual=$(stat -c%s internal/payload/data/bind/madlyx-2.3.bind)
+          if [ "$actual" != "$expect_bind23" ]; then
+            echo "payload was rewritten: madlyx-2.3.bind is $actual bytes, expected $expect_bind23"
+            exit 1
+          fi
+          echo "payload intact"
+
+      - name: Doctor runs and reports cleanly on a bare machine
+        working-directory: go
+        run: |
+          ./madlyx.exe doctor; if ($LASTEXITCODE -gt 1) { throw "doctor crashed with $LASTEXITCODE" }
+          ./madlyx.exe --dry-run --yes; if ($LASTEXITCODE -ne 0) { throw "dry-run failed" }
+
+  # The expensive one: a genuinely clean Windows runner, installing for real.
+  # This is the only way to know the Hebrew smoke-test compile actually passes.
+  install:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Stage payload
+        shell: bash
+        run: cp -r payload go/internal/payload/data
+
+      - name: Build
+        working-directory: go
+        run: go build -trimpath -o madlyx.exe ./cmd/madlyx
+
+      - name: Full install on a clean machine
+        working-directory: go
+        run: |
+          ./madlyx.exe install --yes --skip-system
+          if ($LASTEXITCODE -ne 0) { throw "install failed with $LASTEXITCODE" }
+
+      # Re-running must be a no-op: every step reports itself already done.
+      - name: Re-run is idempotent
+        working-directory: go
+        run: |
+          $out = ./madlyx.exe install --yes --skip-system --skip-test 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { throw "second run failed" }
+          foreach ($needed in 'TeX distribution','LyX','MadLyX settings','MadLyX shortcuts') {
+            if ($out -notmatch [regex]::Escape($needed)) { throw "second run did not mention $needed" }
+          }
+
+      - name: Doctor reports a healthy install
+        working-directory: go
+        run: |
+          ./madlyx.exe doctor
+          if ($LASTEXITCODE -ne 0) { throw "doctor found problems after a successful install" }
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-logs
+          path: ${{ env.LOCALAPPDATA }}\MadLyXInstaller\*.log
+          if-no-files-found: ignore
