@@ -30,9 +30,18 @@ param(
     # because `iex` executes in the caller's scope, PowerShell refuses to
     # overwrite it - "Cannot overwrite variable Args because the variable has
     # been optimized". Invisible until the script is actually piped into iex.
-    [Parameter(ValueFromRemainingArguments = $true)]
+    # Position 0 is explicit and load-bearing. ValueFromRemainingArguments does
+    # not claim a position on its own, so without it the first bare argument
+    # bound to -Repo instead: `bootstrap.ps1 doctor` went looking for a release
+    # in the repository "doctor" and failed with a 404. The documented
+    # scriptblock form had never worked.
+    [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
     [string[]]$Arguments,
 
+    # Named-only. Giving these positions of their own is not enough: a bare
+    # argument still lands on whichever position is left unfilled, so `doctor`
+    # ended up as the release tag. Only -Repo and -Version bind them.
+    [Parameter(ValueFromPipeline = $false)]
     [string]$Repo = 'Neur0nz/MadLyXInstaller',
     [string]$Version = 'latest',
     [switch]$KeepFiles

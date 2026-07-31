@@ -102,13 +102,20 @@ jobs:
       # which is why elevation was never offered and Defender exclusions failed
       # with "needs administrator rights". Nothing in the Go code could have
       # revealed this; only running the real bootstrap does.
-      - name: Bootstrap does not swallow the installer's output
+      #
+      # The same check also catches a second bug it found the first time it
+      # ran: ValueFromRemainingArguments does not claim a position, so the
+      # first bare argument bound to -Repo instead. `bootstrap.ps1 doctor` went
+      # looking for a release in a repository called "doctor" and 404'd - the
+      # argument form the README documents had never worked. Either bug leaves
+      # this step with no version string to find.
+      - name: Bootstrap passes arguments through and does not swallow output
         shell: powershell
         run: |
           $out = & "$PWD\bootstrap.ps1" --version 2>&1 | Out-String
           Write-Host $out
           if ($out -notmatch 'madlyx version') {
-            throw "bootstrap.ps1 swallowed madlyx.exe's stdout - the one-liner would look silent"
+            throw "bootstrap.ps1 lost --version: either it swallowed stdout or it bound the argument to -Repo"
           }
 
   # The expensive one: a genuinely clean Windows runner, installing for real.
