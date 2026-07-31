@@ -1,0 +1,163 @@
+% ============================================================================
+%  MadLyX shared LaTeX preamble
+%
+%  Every fix here is collected from "שימוש נכון בליך" (The MadLyX) by Kali,
+%  with the page it comes from noted. Paste the whole thing into
+%  Document > Settings > LaTeX Preamble, or keep only the parts you want.
+%
+%  The bundled templates already include this. This standalone copy is for
+%  documents you started before installing MadLyX.
+% ============================================================================
+
+
+% ---------------------------------------------------------------------------
+%  Muted colours                                                      (p.45-46)
+%
+%  LyX's stock colours are fluorescent and hard to read in print. These are the
+%  same names, toned down, so existing coloured text just looks calmer.
+%  Affects the PDF only; for the LyX editor window see \set_color in
+%  preferences, which the installer sets on LyX 2.4.
+% ---------------------------------------------------------------------------
+\usepackage{xcolor}
+\definecolor{blue}{RGB}{0, 0, 140}
+\definecolor{red}{RGB}{170, 0, 0}
+\definecolor{green}{RGB}{0, 110, 0}
+\definecolor{magenta}{RGB}{150, 0, 150}
+\definecolor{cyan}{RGB}{0, 120, 140}
+
+
+% ---------------------------------------------------------------------------
+%  Hebrew justification
+%
+%  Hebrew has essentially no hyphenation support in LaTeX, so TeX cannot break
+%  long words to fill a line and you get "Overfull \hbox" warnings and text
+%  spilling into the margin. Letting TeX stretch inter-word spacing further
+%  fixes almost all of it.
+%
+%  Not from the guide - added by MadLyXInstaller.
+% ---------------------------------------------------------------------------
+\sloppy
+\emergencystretch=3em
+
+
+% ---------------------------------------------------------------------------
+%  Blank first page                                                      (p.20)
+%
+%  Some documents render an empty first page before the content. Uncomment if
+%  that happens to you. (Thanks to Amit Tsarfati, via the guide.)
+% ---------------------------------------------------------------------------
+% \setcounter{page}{0}
+% \usepackage{atbegshi}
+% \AtBeginDocument{\AtBeginShipoutNext{\AtBeginShipoutDiscard}}
+
+
+% ---------------------------------------------------------------------------
+%  Correct the \Longrightarrow tail                                   (p.71-72)
+%
+%  The stock \Longrightarrow renders with a malformed tail at some sizes.
+%  This rebuilds it from a plain arrowhead and a rule.
+% ---------------------------------------------------------------------------
+\DeclareFontFamily{OT1}{cmrx}{}
+\DeclareFontShape{OT1}{cmrx}{m}{n}{<->cmr10}{}
+\let\saveLongrightarrow\Longrightarrow
+\makeatletter
+\renewcommand*{\Longrightarrow}{%
+  \mathrel{\rlap{\fontfamily{cmrx}\fontencoding{OT1}\selectfont=}%
+  \hphantom{\saveLongrightarrow}%
+  \llap{$\m@th\Rightarrow$}}}
+\makeatother
+
+\let\saveLongleftarrow\Longleftarrow
+\makeatletter
+\renewcommand*{\Longleftarrow}{%
+  \mathrel{\rlap{$\m@th\Leftarrow$}%
+  \hphantom{\saveLongleftarrow}%
+  \llap{\fontfamily{cmrx}\fontencoding{OT1}\selectfont =}}}
+\makeatother
+
+
+% ---------------------------------------------------------------------------
+%  Disjoint union                                                         (p.72)
+%
+%  Gives \cupdot and \bigcupdot. To use them comfortably in LyX, define a math
+%  macro (Insert > Math > Macro, or Alt+I H O) whose TeX side is \cupdot and
+%  whose LyX side is \dot{\cup}.
+% ---------------------------------------------------------------------------
+\makeatletter
+\def\moverlay{\mathpalette\mov@rlay}
+\def\mov@rlay#1#2{\leavevmode\vtop{%
+    \baselineskip\z@skip \lineskiplimit-\maxdimen
+    \ialign{\hfil$\m@th#1##$\hfil\cr#2\crcr}}}
+\newcommand{\charfusion}[3][\mathord]{
+  #1{\ifx#1\mathop\vphantom{#2}\fi
+     \mathpalette\mov@rlay{#2\cr#3}
+  }
+  \ifx#1\mathop\expandafter\displaylimits\fi}
+\makeatother
+\newcommand{\cupdot}{\charfusion[\mathbin]{\cup}{\cdot}}
+\newcommand{\bigcupdot}{\charfusion[\mathop]{\bigcup}{\cdot}}
+
+
+% ---------------------------------------------------------------------------
+%  Indicator function                                                     (p.73)
+%
+%  The guide answers this one repeatedly: the indicator is \mathds{1}.
+% ---------------------------------------------------------------------------
+\usepackage{dsfont}
+\newcommand{\indicator}{\mathds{1}}
+
+
+% ---------------------------------------------------------------------------
+%  Code listings                                                       (p.63-64)
+%
+%  Styling for Insert > Program Listing. mathescape lets you write maths inside
+%  a listing by wrapping it in $...$. (Thanks to Ziv Rosenwasser, via the guide.)
+% ---------------------------------------------------------------------------
+\usepackage{listings}
+\definecolor{codegreen}{rgb}{0, 0.6, 0}
+\definecolor{codegray}{rgb}{0.5, 0.5, 0.5}
+\definecolor{codepurple}{rgb}{0.58, 0, 0.82}
+\definecolor{backcolour}{rgb}{0.97, 0.98, 0.99}
+\definecolor{codeblue}{rgb}{0, 0, 0.3}
+\lstdefinestyle{mystyle}{
+  backgroundcolor=\color{backcolour},
+  commentstyle=\color{codegreen},
+  keywordstyle=\color{codeblue},
+  numberstyle=\tiny\color{codegray},
+  stringstyle=\color{codepurple},
+  basicstyle=\ttfamily\footnotesize,
+  breakatwhitespace=false,
+  breaklines=true,
+  captionpos=b,
+  keepspaces=true,
+  numbersep=5pt,
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  tabsize=2,
+  mathescape=true
+}
+\lstset{style=mystyle}
+
+
+% ---------------------------------------------------------------------------
+%  Two-column sections                                                    (p.73)
+%
+%  For a document that is one column in places and two in others, leave
+%  Document > Settings > Text Layout on one column and wrap the two-column part
+%  in \begin{multicols}{2} ... \end{multicols} using Ctrl+L (TeX Code).
+% ---------------------------------------------------------------------------
+\usepackage{multicol}
+
+
+% ---------------------------------------------------------------------------
+%  Clickable cross-references                                           (p.53-54)
+%
+%  Turns cross-references into links and generates a PDF bookmark tree.
+%
+%  WARNING (guide, p.53): hyperref throws errors in the heb-article class.
+%  Only enable this in the Standard/AMS article templates - which is why it is
+%  commented out here rather than on by default.
+% ---------------------------------------------------------------------------
+% \usepackage{hyperref}
+% \hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue, bookmarks=true}

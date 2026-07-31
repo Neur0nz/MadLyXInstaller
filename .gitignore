@@ -1,0 +1,11 @@
+# Local installer logs
+*.log
+
+# Backups the installer creates next to the files it edits
+*.madlyx-backup-*
+
+# Editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

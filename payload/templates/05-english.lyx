@@ -1,0 +1,364 @@
+#LyX 2.3 created this file. For more info see http://www.lyx.org/
+\lyxformat 544
+\begin_document
+\begin_header
+\save_transient_properties true
+\origin unavailable
+\textclass article
+\begin_preamble
+% Necessary Commands:
+\usepackage{autobreak}
+\usepackage{relsize}
+% Set vertical space before and after dislpay equations to be longer for better redability:
+\AtBeginDocument{\setlength\abovedisplayskip{12pt}}
+\AtBeginDocument{\setlength\belowdisplayskip{12pt}}
+\AtBeginDocument{\setlength\belowdisplayshortskip{12pt}}
+\AtBeginDocument{\setlength\belowdisplayshortskip{12pt}}
+
+
+% Emlarge the distance between rows of equations in \align enviorment
+\setlength{\jot}{10pt}
+
+% Set space between words to be wider:
+\spaceskip=1.3\fontdimen2\font plus 1\fontdimen3\font minus 1.5\fontdimen4\font
+
+% Convert the Lyx colors into more pleasent colors:
+\usepackage{xcolor}
+\definecolor{blue}{RGB}{12,97,197}
+\definecolor{green}{RGB}{0,128,40}
+\definecolor{red}{RGB}{235,16,16}
+\definecolor{brown}{RGB}{154,58,0}
+\definecolor{orange}{RGB}{231,135,26}
+\definecolor{purple}{RGB}{94,53,177}
+
+% Convert the QED Symbol at the end of proofs to a solid black square (credit: Yakir Oz):
+\usepackage{amssymb}
+\renewcommand{\qedsymbol}{$\blacksquare$}
+
+% Make the layout more similar to Hebrew Article, which I am more used to:
+\renewcommand*{\@seccntformat}[1]{\hspace{0.5cm}\csname the#1\endcsname\hspace{0.5cm}} 
+\usepackage{titlesec}
+\titleformat{\section}{\fontsize{20}{20}\bfseries}{\thesection}{10pt}{}
+\titleformat{\subsection}{\fontsize{15}{15}\bfseries}{\thesubsection}{10pt}{}
+\titleformat{\subsubsection}{\bfseries}{\thesubsubsection}{10pt}{}
+
+% Create disjoint union symbols:
+\makeatletter
+\def\moverlay{\mathpalette\mov@rlay}
+\def\mov@rlay#1#2{\leavevmode\vtop{%
+   \baselineskip\z@skip \lineskiplimit-\maxdimen
+   \ialign{\hfil$\m@th#1##$\hfil\cr#2\crcr}}}
+\newcommand{\charfusion}[3][\mathord]{
+    #1{\ifx#1\mathop\vphantom{#2}\fi
+        \mathpalette\mov@rlay{#2\cr#3}
+      }
+    \ifx#1\mathop\expandafter\displaylimits\fi}
+\makeatother
+\newcommand{\cupdot}{\charfusion[\mathbin]{\cup}{\cdot}}
+\newcommand{\bigcupdot}{\charfusion[\mathop]{\bigcup}{\cdot}}
+
+\newcommand{\kaliLargeLand}{\mathop{\mathlarger{\mathlarger{\mathlarger{\land}}}}}
+
+\newcommand{\indep}{\perp \!\!\! \perp}
+\end_preamble
+\use_default_options true
+\begin_modules
+theorems-ams
+\end_modules
+\maintain_unincluded_children false
+\begin_local_layout
+Style Section
+	Font
+	  Series     Medium
+	  Shape      Smallcaps
+	  Size       Larger
+	  Series     Bold
+	EndFont
+	TocLevel 1
+End
+
+
+Style Section*
+	Font
+	  Series     Medium
+	  Shape      Smallcaps
+	  Size      Larger
+	  Series     Bold
+	EndFont
+End
+
+
+Style Solution
+
+	LabelString           "פיתרון: "
+End
+
+
+Style Notation
+
+	LabelString           "סימון  \thetheorem: "
+End
+
+Style Theorem
+
+	LabelString           "משפט \thetheorem: "
+End
+
+Style Property
+
+	LabelString           "תזכורת: "
+End
+\end_local_layout
+\language english
+\language_package default
+\inputencoding auto
+\fontencoding global
+\font_roman "default" "David"
+\font_sans "default" "David"
+\font_typewriter "default" "David"
+\font_math "auto" "auto"
+\font_default_family default
+\use_non_tex_fonts false
+\font_sc false
+\font_osf false
+\font_sf_scale 100 100
+\font_tt_scale 100 100
+\use_microtype false
+\use_dash_ligatures true
+\graphics default
+\default_output_format default
+\output_sync 0
+\bibtex_command default
+\index_command default
+\paperfontsize default
+\spacing onehalf
+\use_hyperref true
+\pdf_bookmarks true
+\pdf_bookmarksnumbered false
+\pdf_bookmarksopen false
+\pdf_bookmarksopenlevel 1
+\pdf_breaklinks false
+\pdf_pdfborder false
+\pdf_colorlinks false
+\pdf_backref false
+\pdf_pdfusetitle true
+\papersize default
+\use_geometry true
+\use_package amsmath 1
+\use_package amssymb 1
+\use_package cancel 1
+\use_package esint 1
+\use_package mathdots 1
+\use_package mathtools 1
+\use_package mhchem 1
+\use_package stackrel 1
+\use_package stmaryrd 1
+\use_package undertilde 1
+\cite_engine basic
+\cite_engine_type default
+\biblio_style plain
+\use_bibtopic false
+\use_indices false
+\paperorientation portrait
+\suppress_date false
+\justification true
+\use_refstyle 1
+\use_minted 0
+\index Index
+\shortcut idx
+\color #008000
+\end_index
+\leftmargin 1cm
+\topmargin 2cm
+\rightmargin 1cm
+\bottommargin 3cm
+\headheight 0cm
+\headsep 0cm
+\footskip 2cm
+\secnumdepth -2
+\tocdepth 3
+\paragraph_separation indent
+\paragraph_indentation 0bp
+\is_math_indent 0
+\math_numbering_side default
+\quotes_style english
+\dynamic_quotes 0
+\papercolumns 1
+\papersides 1
+\paperpagestyle default
+\tracking_changes false
+\output_changes false
+\html_math_output 0
+\html_css_as_file 0
+\html_be_strict false
+\end_header
+
+\begin_body
+
+\begin_layout Standard
+\begin_inset Box Doublebox
+position "t"
+hor_pos "c"
+has_inner_box 1
+inner_pos "t"
+use_parbox 0
+use_makebox 0
+width "100col%"
+special "none"
+height "1in"
+height_special "totalheight"
+thickness "0.4pt"
+separation "3pt"
+shadowsize "4pt"
+framecolor "black"
+backgroundcolor "none"
+status open
+
+\begin_layout Plain Layout
+\begin_inset space \space{}
+\end_inset
+
+
+\end_layout
+
+\begin_layout Plain Layout
+\align center
+
+\size giant
+Course Name - Exercise X
+\end_layout
+
+\begin_layout Plain Layout
+\align center
+
+\size larger
+Gilad Tal - 123456789
+\end_layout
+
+\begin_layout Plain Layout
+\align center
+\begin_inset ERT
+status open
+
+\begin_layout Plain Layout
+
+
+\backslash
+today
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Plain Layout
+\begin_inset space \space{}
+\end_inset
+
+
+\end_layout
+
+\end_inset
+
+
+\end_layout
+
+\begin_layout Section
+Question 1
+\end_layout
+
+\begin_layout Subsection
+(a)
+\end_layout
+
+\begin_layout Subsection
+(b)
+\end_layout
+
+\begin_layout Subsection
+(c)
+\end_layout
+
+\begin_layout Section
+Question 2
+\end_layout
+
+\begin_layout Subsection
+(a)
+\end_layout
+
+\begin_layout Subsection
+(b)
+\end_layout
+
+\begin_layout Subsection
+(c)
+\end_layout
+
+\begin_layout Section
+Question 3
+\end_layout
+
+\begin_layout Subsection
+(a)
+\end_layout
+
+\begin_layout Subsection
+(b)
+\end_layout
+
+\begin_layout Subsection
+(c)
+\end_layout
+
+\begin_layout Section
+Question 4
+\end_layout
+
+\begin_layout Subsection
+(a)
+\end_layout
+
+\begin_layout Subsection
+(b)
+\end_layout
+
+\begin_layout Subsection
+(c)
+\end_layout
+
+\begin_layout Section
+Question 5
+\end_layout
+
+\begin_layout Subsection
+(a)
+\end_layout
+
+\begin_layout Subsection
+(b)
+\end_layout
+
+\begin_layout Subsection
+(c)
+\end_layout
+
+\begin_layout Section
+Question 6
+\end_layout
+
+\begin_layout Subsection
+(a)
+\end_layout
+
+\begin_layout Subsection
+(b)
+\end_layout
+
+\begin_layout Subsection
+(c)
+\end_layout
+
+\end_body
+\end_document
