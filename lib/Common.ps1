@@ -222,6 +222,31 @@ function Get-CommandPath {
 }
 
 <#
+    Poll $Condition until it returns something truthy, or the timeout expires.
+    Returns the condition's value, or $null on timeout.
+
+    Needed because winget returns as soon as it has handed off to the underlying
+    installer. An NSIS package like LyX keeps writing files after winget's exit
+    code arrives, so checking for the installation once, immediately, reports it
+    missing and sends us down the Chocolatey fallback for an install that was
+    actually about to succeed.
+#>
+function Wait-For {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Condition,
+        [int]$TimeoutSeconds = 120,
+        [int]$IntervalMs = 2000
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        $result = & $Condition
+        if ($result) { return $result }
+        if ((Get-Date) -ge $deadline) { return $null }
+        Start-Sleep -Milliseconds $IntervalMs
+    }
+}
+
+<#
     Download a file with a progress-free, reasonably patient web request.
     Returns $true on success.
 #>

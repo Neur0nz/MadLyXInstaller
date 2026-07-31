@@ -79,7 +79,10 @@ function Install-MiKTeX {
             '--accept-package-agreements', '--accept-source-agreements'
         ) | Out-Null
 
-        $miktex = Find-MiKTeX
+        # Same settling problem as LyX: winget returns before the installer has
+        # finished writing, so poll rather than checking once.
+        Write-Info 'Waiting for the installation to finish settling...'
+        $miktex = Wait-For { Find-MiKTeX } -TimeoutSeconds 180
         if ($miktex) {
             Write-Ok "MiKTeX installed at $($miktex.BinDir)"
             Enable-MiKTeXAutoInstall -MiKTeX $miktex

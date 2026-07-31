@@ -91,17 +91,21 @@ function Install-LyX {
 
     if (Get-CommandPath 'winget') {
         Write-Info 'Installing via winget (this can take a few minutes)...'
-        $ok = Invoke-Native 'winget' @(
+        Invoke-Native 'winget' @(
             'install', '--id', 'LyX.LyX', '--exact', '--silent',
             '--accept-package-agreements', '--accept-source-agreements'
-        )
-        if ($ok) {
-            # winget's exit code is not a reliable success signal for every
-            # installer, so confirm by locating the binary.
-            $lyx = Find-LyXInstallation
-            if ($lyx) { Write-Ok "LyX $($lyx.Version) installed."; return $lyx }
-        }
-        Write-Warn 'winget did not produce a working LyX installation.'
+        ) | Out-Null
+
+        # winget's exit code is not a reliable success signal, so confirm by
+        # locating the binary - but wait for it. winget returns once it has
+        # handed off to the NSIS installer, which is still unpacking, so an
+        # immediate check reports "not installed" for an install that succeeds
+        # moments later and wrongly falls through to Chocolatey.
+        Write-Info 'Waiting for the installation to finish settling...'
+        $lyx = Wait-For { Find-LyXInstallation } -TimeoutSeconds 180
+        if ($lyx) { Write-Ok "LyX $($lyx.Version) installed."; return $lyx }
+
+        Write-Warn 'winget did not produce a working LyX installation within 3 minutes.'
     }
 
     if (Get-CommandPath 'choco') {
