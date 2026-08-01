@@ -118,6 +118,10 @@ func texDistribution(o Options) *step.Step {
 			if err := pkgmgr.EnableMiKTeXAutoInstall(ctx, o.Runner, t.BinDir); err != nil {
 				c.UI.Warn("could not enable automatic package installation: %v", err)
 			}
+
+			// Build the caches now, while nothing is waiting on them. Left cold,
+			// the next step pays for them 118 times over - see WarmMiKTeX.
+			pkgmgr.WarmMiKTeX(ctx, o.Runner, t.BinDir, func(s string) { c.UI.Detail(s) })
 			return nil
 		},
 	}

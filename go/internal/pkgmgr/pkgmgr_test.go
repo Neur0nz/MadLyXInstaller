@@ -218,3 +218,20 @@ func TestWingetDownloadDoesNotInstall(t *testing.T) {
 		t.Errorf("download must not install: %s", call)
 	}
 }
+
+// The whole point of warming is that it happens before LyX, not after, and that
+// a failure never blocks the install - it is a time optimisation, not a step.
+func TestWarmMiKTeXBuildsBothCachesAndSurvivesFailure(t *testing.T) {
+	r := &fakeRunner{fail: map[string]bool{"--update-fndb": true}}
+	WarmMiKTeX(context.Background(), r, `C:\bin`, nil)
+
+	joined := strings.Join(r.calls[0], " ") + " " + strings.Join(r.calls[len(r.calls)-1], " ")
+	for _, want := range []string{"miktex-fc-cache.exe", "--update-fndb"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("warming did not run %q: %v", want, r.calls)
+		}
+	}
+	if len(r.calls) != 2 {
+		t.Errorf("expected both caches to be attempted, got %d calls", len(r.calls))
+	}
+}

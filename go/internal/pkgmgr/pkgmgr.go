@@ -338,6 +338,43 @@ func EnableMiKTeXAutoInstall(ctx context.Context, r Runner, binDir string) error
 	return err
 }
 
+// WarmMiKTeX builds the caches that a fresh MiKTeX otherwise builds lazily,
+// once each, at the worst possible moment.
+//
+// Measured on a clean machine: installing LyX straight after MiKTeX took 8m41s,
+// and miktex.log shows why - LyX's configure invoked miktex-fc-cache 118 times,
+// each rebuilding the font-config cache from nothing at roughly 3.5 seconds a
+// go. The same LyX install against an already-used MiKTeX took 35 seconds, and
+// a warm miktex-fc-cache returns in 0.73s.
+//
+// So the cost is not the download (11s), not Defender scanning the 3,576 files
+// LyX extracts, and not LyX's configure itself (4 LaTeX runs, 21s) - it is one
+// cache being rebuilt over and over. Building it once here needs no
+// administrator rights, which matters because the alternative fix, Defender
+// exclusions, does.
+func WarmMiKTeX(ctx context.Context, r Runner, binDir string, progress func(string)) {
+	steps := []struct {
+		name string
+		exe  string
+		args []string
+	}{
+		{"font cache", "miktex-fc-cache.exe", []string{"--miktex-disable-maintenance"}},
+		{"file name database", "initexmf.exe", []string{"--update-fndb"}},
+	}
+	for _, s := range steps {
+		if progress != nil {
+			progress("preparing the " + s.name)
+		}
+		each, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		_, err := r.Run(each, filepath.Join(binDir, s.exe), s.args...)
+		cancel()
+		if err != nil {
+			// Warming is an optimisation; a failure costs time, not correctness.
+			continue
+		}
+	}
+}
+
 // KpsewhichFinds reports whether TeX can resolve a file, which is how the
 // doctor checks that culmus.sty and friends are actually reachable.
 func KpsewhichFinds(ctx context.Context, r Runner, binDir, file string) bool {
