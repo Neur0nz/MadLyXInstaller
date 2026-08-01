@@ -24,13 +24,13 @@ var (
 )
 
 type globalFlags struct {
-	dryRun      bool
-	yes         bool
-	texDistro   string
-	skipSmoke   bool
-	skipSystem  bool
-	elevate     bool
-	verbose     bool
+	dryRun     bool
+	yes        bool
+	texDistro  string
+	skipSmoke  bool
+	skipSystem bool
+	elevate    bool
+	verbose    bool
 }
 
 func main() {
@@ -54,7 +54,7 @@ func main() {
 	root.PersistentFlags().StringVar(&g.texDistro, "tex", "auto", "TeX distribution: auto, miktex or texlive")
 	root.PersistentFlags().BoolVar(&g.skipSmoke, "skip-test", false, "skip the final Hebrew test compile")
 	root.PersistentFlags().BoolVar(&g.skipSystem, "skip-system", false, "do not offer changes outside LyX")
-	root.PersistentFlags().BoolVar(&g.elevate, "elevate", false, "restart with administrator rights, enabling the Defender exclusions")
+	root.PersistentFlags().BoolVar(&g.elevate, "elevate", false, "skip the question and restart with administrator rights (enables the Defender exclusions)")
 	root.PersistentFlags().BoolVarP(&g.verbose, "verbose", "v", false, "log more detail")
 
 	root.AddCommand(&cobra.Command{
@@ -114,6 +114,7 @@ func options(g globalFlags, log *logger) steps.Options {
 func runInstall(g globalFlags) error {
 	ctx, log, u := newContext(g)
 	defer log.Close()
+	defer u.Close() // tears down the display even when a step returns an error
 
 	u.Title("MadLyX Installer", version)
 	if g.dryRun {
@@ -144,6 +145,7 @@ func runInstall(g globalFlags) error {
 func runDoctor(g globalFlags) error {
 	ctx, log, u := newContext(g)
 	defer log.Close()
+	defer u.Close() // tears down the display even when a step returns an error
 
 	u.Title("MadLyX Doctor", version)
 	reportEnvironment(u)
@@ -193,6 +195,7 @@ func runDoctor(g globalFlags) error {
 func runUninstall(g globalFlags) error {
 	ctx, log, u := newContext(g)
 	defer log.Close()
+	defer u.Close() // tears down the display even when a step returns an error
 
 	u.Title("MadLyX Uninstall", version)
 	if !u.Confirm("Undo the changes MadLyX made?",
@@ -238,13 +241,34 @@ func reportEnvironment(u *ui.UI) {
 // Gated on being able to prompt: without a console there is nobody to accept
 // the UAC dialog, so it would hang rather than help.
 func maybeElevate(g globalFlags, u *ui.UI) error {
-	if !g.elevate || g.dryRun || isAdmin() {
+	if g.dryRun || isAdmin() {
+		return nil
+	}
+
+	// --elevate skips the question, for scripts and for anyone who already
+	// knows they want it.
+	wants := g.elevate
+	if !wants {
+		if !u.CanPrompt() {
+			return nil // unattended: never assume a system change is wanted
+		}
+		wants = u.Confirm("Run with administrator rights?",
+			"Not required. The whole setup installs for your user only, so nothing\n"+
+				"here needs permission - answering no gets you a complete install with\n"+
+				"no Windows prompts at all.\n\n"+
+				"Saying yes adds Windows Defender exclusions for the TeX folders, which\n"+
+				"makes compiling noticeably faster. Windows will ask once, now.", false)
+	}
+	if !wants {
 		return nil
 	}
 	if !u.CanPrompt() {
 		u.Warn("--elevate needs a terminal to accept the Windows prompt; continuing without it")
 		return nil
 	}
+
+	// The display owns the terminal; hand it back before Windows draws over it.
+	u.Close()
 	code, err := relaunchElevated(os.Args[1:])
 	if err != nil {
 		u.Warn("could not restart elevated: %v", err)
