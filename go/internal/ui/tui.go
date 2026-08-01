@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -66,6 +67,7 @@ type running struct {
 
 type model struct {
 	spin   spinner.Model
+	bar    progress.Model
 	vp     viewport.Model
 	ready  bool
 	width  int
@@ -85,7 +87,9 @@ func newModel() *model {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-	return &model{spin: s, width: 100, height: 24}
+	b := progress.New(progress.WithDefaultGradient(), progress.WithoutPercentage())
+	b.Width = 30
+	return &model{spin: s, bar: b, width: 100, height: 24}
 }
 
 func (m *model) Init() tea.Cmd { return m.spin.Tick }
@@ -97,6 +101,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the terminal width once at startup and truncated against a number
 		// that could already be wrong.
 		m.width, m.height = msg.Width, msg.Height
+		m.bar.Width = clamp(m.width/3, 10, 40)
 		m.layout()
 		return m, nil
 
@@ -300,6 +305,16 @@ func (m *model) View() string {
 		b.WriteString(styleKeys.Render("  ↑/↓ scroll · ctrl+c cancel") + "\n")
 	}
 	return b.String()
+}
+
+func clamp(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // truncANSI shortens a rendered line to n visible columns, ignoring escapes.
