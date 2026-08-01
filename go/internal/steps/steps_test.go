@@ -159,3 +159,19 @@ func contains2(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// The installer's default directory is "LyX <major>.<minor>", so the series has
+// to be read from the file rather than hard-coded, or placing the dictionary
+// silently stops working when LyX 2.5 ships.
+func TestLyXSeriesIsReadFromTheInstallerName(t *testing.T) {
+	for name, want := range map[string]string{
+		"LyX_2.4.4.1_X64_nullsoft_en-US.exe": "2.4",
+		"LyX_2.5.0_X64_nullsoft_en-US.exe":   "2.5",
+		"LyX_2.10.1_X64_nullsoft_en-US.exe":  "2.10",
+		"something-unexpected.exe":           "2.4",
+	} {
+		if got := lyxSeriesFromInstaller(name); got != want {
+			t.Errorf("%s gave %q, want %q", name, got, want)
+		}
+	}
+}

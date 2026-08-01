@@ -226,6 +226,11 @@ func lyxInstall(o Options) *step.Step {
 				if derr != nil {
 					c.Log.Logf("winget download reported: %v", derr)
 				} else {
+					// Before the installer runs, not after: it only skips its own
+					// (404ing) download when the files are already there.
+					c.UI.Detail("fetching the Hebrew spell-check dictionary")
+					placeHebrewDictionary(c, filepath.Base(installer))
+
 					c.UI.Detail("running the LyX installer")
 					if _, rerr := o.Runner.RunWith(ctx,
 						pkgmgr.RunOpts{Env: []string{pkgmgr.RunAsInvoker}},

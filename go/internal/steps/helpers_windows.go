@@ -107,6 +107,76 @@ func appendLinesIfMissing(path string, lines []string) error {
 	return err
 }
 
+// hebrewDictURLs are the Hunspell files LyX wants for Hebrew spell checking.
+//
+// LyX's own installer fetches these from
+// https://www.lyx.org/trac/export/HEAD/lyxsvn/dictionaries/trunk/dicts/, which
+// now returns 404 for both - verified. The LibreOffice dictionary repository
+// carries the same files and serves them.
+var hebrewDictURLs = map[string]string{
+	"he_IL.aff": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/he_IL/he_IL.aff",
+	"he_IL.dic": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/he_IL/he_IL.dic",
+}
+
+// placeHebrewDictionary puts the Hunspell files where LyX's installer expects
+// them, before that installer runs.
+//
+// On a machine whose Windows language is Hebrew, LyX's installer selects the
+// Hebrew dictionary automatically and downloads it. That download 404s, and the
+// installer reports it with MessageBox - which NSIS still displays under /S. So
+// a silent install stops dead on two modal dialogs, in Hebrew, waiting for
+// someone to click. A student reported exactly that.
+//
+// The installer skips the download when the file is already present:
+//
+//	${IfNot} ${FileExists} "$INSTDIR\Resources\dicts\$R9"
+//	  inetc::get ...
+//
+// So writing the files first removes the dialogs and, unlike simply suppressing
+// them, leaves Hebrew spell checking actually working.
+//
+// Failure here is not fatal: the worst case is the dialogs LyX would have shown
+// anyway.
+func placeHebrewDictionary(c *step.Context, installerName string) {
+	dir := filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs",
+		"LyX "+lyxSeriesFromInstaller(installerName), "Resources", "dicts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		c.Log.Logf("hebrew dictionary: %v", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	for name, url := range hebrewDictURLs {
+		dest := filepath.Join(dir, name)
+		if st, err := os.Stat(dest); err == nil && st.Size() > 0 {
+			continue
+		}
+		if err := download(ctx, url, dest); err != nil {
+			c.Log.Logf("hebrew dictionary %s: %v", name, err)
+			// Leave nothing half-written: a truncated file would satisfy the
+			// installer's existence check and break spell checking silently.
+			os.Remove(dest)
+			continue
+		}
+		c.Log.Logf("placed %s", dest)
+	}
+}
+
+// lyxSeriesFromInstaller reads "2.4" out of "LyX_2.4.4.1_X64_nullsoft_en-US.exe".
+//
+// The installer's own default directory is "LyX <major>.<minor>", so this has
+// to track the file rather than be hard-coded, or it will silently stop working
+// when LyX 2.5 ships.
+func lyxSeriesFromInstaller(name string) string {
+	var major, minor int
+	if n, _ := fmt.Sscanf(name, "LyX_%d.%d", &major, &minor); n == 2 {
+		return fmt.Sprintf("%d.%d", major, minor)
+	}
+	return "2.4"
+}
+
 // warmCompile runs one throwaway LaTeX compile so that MiKTeX builds its
 // formats, font metrics and caches now rather than during the LyX install.
 //
