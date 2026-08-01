@@ -132,8 +132,8 @@ func TestBindPathsResolve(t *testing.T) {
 
 func TestDiagnoseFailureMessagesNameTheFix(t *testing.T) {
 	cases := map[string]string{
-		"! LaTeX Error: File `culmus.sty' not found.":  "guide p.21",
-		"! LaTeX Error: File `cp1255.def' not found.":  "guide p.25",
+		"! LaTeX Error: File `culmus.sty' not found.": "guide p.21",
+		"! LaTeX Error: File `cp1255.def' not found.": "guide p.25",
 	}
 	for output, wantFragment := range cases {
 		got := diagnoseCompile(output, nil)

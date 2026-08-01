@@ -191,3 +191,36 @@ func stripANSI(s string) string {
 	}
 	return b.String()
 }
+
+// The scrollback must not reserve height it is not using: a fixed-height
+// viewport left a block of empty rows between the last line and the help text
+// for most of a run.
+func TestScrollbackGrowsWithContentInsteadOfPadding(t *testing.T) {
+	m := sized(80, 30)
+	m = send(m, noteMsg{kind: "info", text: "one"}, noteMsg{kind: "info", text: "two"})
+
+	if m.vp.Height > len(m.history) {
+		t.Errorf("viewport reserved %d rows for %d lines of history", m.vp.Height, len(m.history))
+	}
+	blank := 0
+	for _, l := range strings.Split(m.View(), "\n") {
+		if strings.TrimSpace(stripANSI(l)) == "" {
+			blank++
+		}
+	}
+	if blank > 4 {
+		t.Errorf("view has %d blank lines with only two entries:\n%s", blank, m.View())
+	}
+}
+
+// The banner carries the version, so a bug report says which build produced it.
+func TestBannerShowsVersionAndProgress(t *testing.T) {
+	m := sized(100, 30)
+	m = send(m, titleMsg{version: "v0.8.0"}, overallMsg{done: 3, total: 13})
+	view := stripANSI(m.View())
+	for _, want := range []string{"MadLyX", "v0.8.0", "3/13"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("banner is missing %q:\n%s", want, view)
+		}
+	}
+}

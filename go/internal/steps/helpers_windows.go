@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Neur0nz/MadLyXInstaller/go/internal/payload"
 	"github.com/Neur0nz/MadLyXInstaller/go/internal/step"
 	"github.com/Neur0nz/MadLyXInstaller/go/internal/winenv"
 )
@@ -104,6 +105,49 @@ func appendLinesIfMissing(path string, lines []string) error {
 	defer f.Close()
 	_, err = f.WriteString(strings.Join(toAdd, "\n") + "\n")
 	return err
+}
+
+// warmCompile runs one throwaway LaTeX compile so that MiKTeX builds its
+// formats, font metrics and caches now rather than during the LyX install.
+//
+// This is the third attempt at the same nine minutes, and the first two were
+// wrong, so here is what the evidence actually says. During the LyX install
+// MiKTeX logs roughly 350 operations a minute for the whole nine minutes, and
+// miktex-fc-cache is invoked 129 times, once every three seconds. LyX's own
+// installer calls initexmf twice, not 129 times, so those invocations come
+// from inside MiKTeX generating things on demand.
+//
+// Calling miktex-fc-cache up front did not help: it was still invoked 130
+// times afterwards. The one measurement where the same installer finished in
+// 35 seconds was against a MiKTeX that had already compiled a document - which
+// is the difference. Formats and font metrics are built by compiling, not by
+// refreshing a cache.
+//
+// So compile something. The bundled Hebrew test document is the right choice:
+// it pulls in the same fonts and packages the real work needs, so nothing is
+// warmed that would not have been needed anyway.
+func warmCompile(c *step.Context, t winenv.TeX) {
+	work, err := os.MkdirTemp("", "madlyx-warm")
+	if err != nil {
+		return
+	}
+	defer os.RemoveAll(work)
+
+	src := filepath.Join(work, "warm.tex")
+	if err := payload.WriteTo("data/smoketest/smoketest.tex", src); err != nil {
+		c.Log.Logf("warm compile: %v", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, filepath.Join(t.BinDir, "pdflatex.exe"),
+		"-interaction=nonstopmode", "warm.tex")
+	cmd.Dir = work
+	hideConsole(cmd)
+	out, err := cmd.CombinedOutput()
+	c.Log.Logf("warm compile finished (err=%v), output: %s", err, string(out))
 }
 
 // reconfigureLyX makes LyX rescan the TeX installation.

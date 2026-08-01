@@ -122,6 +122,8 @@ func texDistribution(o Options) *step.Step {
 			// Build the caches now, while nothing is waiting on them. Left cold,
 			// the next step pays for them 118 times over - see WarmMiKTeX.
 			pkgmgr.WarmMiKTeX(ctx, o.Runner, t.BinDir, func(s string) { c.UI.Detail(s) })
+			c.UI.Detail("building TeX formats and fonts (once, so LyX does not have to)")
+			warmCompile(c, t)
 			return nil
 		},
 	}

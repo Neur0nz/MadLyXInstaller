@@ -124,7 +124,7 @@ func (u *UI) Title(name, version string) {
 		fmt.Fprintf(u.out, "%s %s\n", name, version)
 		return
 	}
-	u.send(noteMsg{kind: "section", text: name + "  " + version})
+	u.send(titleMsg{version: version})
 }
 
 // Section starts a named phase of work.

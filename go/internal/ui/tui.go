@@ -36,6 +36,7 @@ type (
 		text string
 	}
 	summaryMsg struct{ rows [][]string }
+	titleMsg   struct{ version string }
 	// confirmMsg carries its own reply channel, which is what lets Confirm
 	// block the installer goroutine while the user decides without the display
 	// freezing.
@@ -56,7 +57,22 @@ var (
 	styleInfo     = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	styleQuestion = lipgloss.NewStyle().Bold(true)
 	styleKeys     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	styleLogo     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
+	styleTag      = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	styleBox      = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("13")).
+			Padding(0, 2)
 )
+
+// banner is the wordmark. Kept small deliberately: this runs above a live
+// status block on an 80-column console, and a tall figlet logo would push the
+// thing people actually need to read off the screen.
+func banner(version string, bar string, done, total int) string {
+	title := styleLogo.Render("MadLyX") + styleTag.Render("  "+version)
+	line := bar + styleTag.Render(fmt.Sprintf("  %d/%d steps", done, total))
+	return styleBox.Render(title + "\n" + line)
+}
 
 // running is one step currently in flight.
 type running struct {
@@ -80,6 +96,7 @@ type model struct {
 
 	pending *confirmMsg
 	summary [][]string
+	version string
 	quit    bool
 }
 
@@ -177,6 +194,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pending = &msg
 		return m, nil
 
+	case titleMsg:
+		m.version = msg.version
+		return m, nil
+
 	case summaryMsg:
 		m.summary = msg.rows
 		return m, nil
@@ -237,6 +258,12 @@ func (m *model) push(line string) {
 	atBottom := !m.ready || m.vp.AtBottom()
 	m.history = append(m.history, line)
 	if m.ready {
+		// Grow with the content rather than reserving the full height from the
+		// start: a fixed-height viewport left a block of empty rows between the
+		// last line and the help text for most of a run.
+		if h := m.height - m.chromeHeight(); m.vp.Height < h && m.vp.Height < len(m.history) {
+			m.vp.Height = min(h, len(m.history))
+		}
 		m.vp.SetContent(strings.Join(m.history, "\n"))
 		if atBottom {
 			m.vp.GotoBottom()
@@ -246,8 +273,11 @@ func (m *model) push(line string) {
 
 func (m *model) layout() {
 	h := m.height - m.chromeHeight()
-	if h < 3 {
-		h = 3
+	if h > len(m.history) {
+		h = len(m.history) // no empty rows below the last line
+	}
+	if h < 1 {
+		h = 1
 	}
 	if !m.ready {
 		m.vp = viewport.New(m.width, h)
@@ -261,7 +291,7 @@ func (m *model) layout() {
 
 // chromeHeight is everything that is not scrollback: header, live steps, help.
 func (m *model) chromeHeight() int {
-	n := 2 + len(m.live) + 2
+	n := 4 + 1 + len(m.live) + 2
 	if m.pending != nil {
 		n += 3 + strings.Count(m.pending.detail, "\n")
 	}
@@ -274,8 +304,12 @@ func (m *model) View() string {
 	}
 	var b strings.Builder
 
-	b.WriteString(styleHeader.Render(fmt.Sprintf("MadLyX  %d/%d steps", m.done, m.total)))
-	b.WriteString("\n\n")
+	pct := 0.0
+	if m.total > 0 {
+		pct = float64(m.done) / float64(m.total)
+	}
+	b.WriteString(banner(m.version, m.bar.ViewAs(pct), m.done, m.total))
+	b.WriteString("\n")
 
 	if m.ready {
 		b.WriteString(m.vp.View())
@@ -305,6 +339,13 @@ func (m *model) View() string {
 		b.WriteString(styleKeys.Render("  ↑/↓ scroll · ctrl+c cancel") + "\n")
 	}
 	return b.String()
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func clamp(v, lo, hi int) int {
