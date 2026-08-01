@@ -114,6 +114,7 @@ func options(g globalFlags, log *logger) steps.Options {
 func runInstall(g globalFlags) error {
 	ctx, log, u := newContext(g)
 	defer log.Close()
+	defer u.Close() // tears down the display even when a step returns an error
 
 	u.Title("MadLyX Installer", version)
 	if g.dryRun {
@@ -144,6 +145,7 @@ func runInstall(g globalFlags) error {
 func runDoctor(g globalFlags) error {
 	ctx, log, u := newContext(g)
 	defer log.Close()
+	defer u.Close() // tears down the display even when a step returns an error
 
 	u.Title("MadLyX Doctor", version)
 	reportEnvironment(u)
@@ -193,6 +195,7 @@ func runDoctor(g globalFlags) error {
 func runUninstall(g globalFlags) error {
 	ctx, log, u := newContext(g)
 	defer log.Close()
+	defer u.Close() // tears down the display even when a step returns an error
 
 	u.Title("MadLyX Uninstall", version)
 	if !u.Confirm("Undo the changes MadLyX made?",
