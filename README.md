@@ -15,12 +15,8 @@ permission.
 
 ---
 
-## ⚠️ This project was written by AI
-
-Almost every line of this installer was written by **Claude** (Anthropic's AI
-model), working with a human who directed it, tested it and decided what went
-in. That is not hidden, and you should know it before running it on your
-computer.
+## ⚠️ Vibecoded
+most of this project was written for fun and vibecoded with Claude, while I have tested things and am pretty confident, take that into account.
 
 What that means in practice:
 
@@ -29,10 +25,6 @@ What that means in practice:
   and behaviour described here are measured, not guessed.
 - **The code is open.** Anything it does to your computer, you can read in this
   repository first.
-- **It is not audited software.** It was built quickly, by a model, and bugs
-  found during development were real and numerous. If you are cautious about
-  what you run, read the code, or ask someone who can.
-- **It backs up whatever it changes** and can undo itself (`uninstall`).
 
 If that trade sounds fine to you, it will save you a long, fiddly afternoon. If
 it does not, the guide tells you how to do all of this by hand.
