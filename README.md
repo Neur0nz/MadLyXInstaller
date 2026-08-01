@@ -1,97 +1,138 @@
 # MadLyX Installer
 
-Sets up LyX for writing Hebrew mathematics on Windows, the way
-**"שימוש נכון בליך" (The MadLyX)** by Kali describes — plus the quality-of-life
-settings the guide doesn't cover.
+Sets up **LyX** on Windows for writing mathematics in Hebrew — everything
+configured the way **"שימוש נכון בליך" (The MadLyX)** by Kali describes, in one
+command, in about four minutes.
 
-One command. No Python, no prerequisites, nothing to install first.
+You do not need to install anything first. No Python, no LaTeX, no setup.
 
 ```powershell
 irm https://raw.githubusercontent.com/Neur0nz/MadLyXInstaller/main/bootstrap.ps1 | iex
 ```
 
-To pass options, use the scriptblock form — `irm | iex` cannot take arguments:
+Open PowerShell, paste that, press Enter. It will not ask for administrator
+permission.
+
+---
+
+## ⚠️ This project was written by AI
+
+Almost every line of this installer was written by **Claude** (Anthropic's AI
+model), working with a human who directed it, tested it and decided what went
+in. That is not hidden, and you should know it before running it on your
+computer.
+
+What that means in practice:
+
+- **It has been tested on real machines**, repeatedly, from a completely clean
+  Windows install through to a Hebrew PDF coming out the other end. The timings
+  and behaviour described here are measured, not guessed.
+- **The code is open.** Anything it does to your computer, you can read in this
+  repository first.
+- **It is not audited software.** It was built quickly, by a model, and bugs
+  found during development were real and numerous. If you are cautious about
+  what you run, read the code, or ask someone who can.
+- **It backs up whatever it changes** and can undo itself (`uninstall`).
+
+If that trade sounds fine to you, it will save you a long, fiddly afternoon. If
+it does not, the guide tells you how to do all of this by hand.
+
+---
+
+## What you get
+
+**A working LaTeX setup**
+MiKTeX (the TeX engine) and LyX itself, installed for your user account only —
+which is why Windows never asks for permission. Missing LaTeX packages install
+themselves later, automatically, so you never hit "package not found".
+
+**Hebrew that actually works**
+The Culmus fonts, the `babel-hebrew` support files, and the font registration
+the guide spends two pages explaining. Press **F12** in LyX to switch between
+Hebrew and English while typing.
+
+**About 500 maths shortcuts**
+Kali's shortcut file, matched to your LyX version. In a maths box, `Alt+W` then
+`A` gives you α. No more hunting through menus for symbols.
+
+**Five ready-made documents**
+Press **Ctrl+Shift+N** in LyX and start from a template that is already set up
+for Hebrew — homework, articles, two-column, English.
+
+**Kali's macros and a shared preamble**
+Dropped into `Documents\MadLyX`, with the guide's LaTeX fixes already applied
+and about twenty optional extras you can switch on by uncommenting a line.
+
+**Sensible settings**
+Instant maths preview, autosave, crash backups, readable editor colours, arrow
+keys that behave correctly in right-to-left text. Every setting checked against
+LyX's own source rather than copied from a forum post.
+
+**It proves it worked**
+Before finishing, it compiles a Hebrew document to PDF. If that fails, it tells
+you which of the guide's known problems you hit, rather than "something went
+wrong".
+
+---
+
+## Before you start
+
+- **Windows 10 or 11.** macOS users: see
+  [Sraya's guide](https://srayaa.wixsite.com/math/various).
+- **About 2 GB of disk space** and a few minutes.
+- **Keep Hebrew out of your folder names.** If your Windows username is in
+  Hebrew, PDF export breaks — this is the single most common cause of failure in
+  the guide, and Windows gives no supported way to rename a profile folder. The
+  installer detects it, warns you, and switches to a TeX distribution that copes
+  better, but the real fix is an account with an English name.
+
+## If Windows blocks it
+
+Some Windows 11 machines run **Smart App Control**, which refuses programs it
+has not seen before. If you get *"An Application Control policy has blocked this
+file"*, that is what happened — the installer is not signed with a paid
+certificate.
+
+It is not a virus warning and nothing is wrong with your computer. Tell whoever
+sent you this link; a rebuild usually clears it. Do **not** turn Smart App
+Control off to work around this — once disabled, Windows will not let you turn
+it back on without reinstalling.
+
+---
+
+## After it finishes
+
+- **F12** switches between Hebrew and English inside LyX.
+- **Keep Windows itself on English** — LyX supplies the Hebrew.
+- **Ctrl+Shift+N** starts a document from a MadLyX template.
+- Check the shortcuts loaded: in a maths box, **Alt+W** then **A** gives α.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| *(no argument)* | Install and configure everything |
+| `doctor` | Check your setup and report problems. Changes nothing |
+| `uninstall` | Undo the changes this installer made, restoring your backups |
+| `--dry-run` | Show what would change, without changing it |
+| `--elevate` | Also add Windows Defender exclusions, which make compiling faster. This is the only part that needs administrator rights, so it asks |
+
+To pass a command, use this form instead — `irm | iex` cannot take arguments:
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Neur0nz/MadLyXInstaller/main/bootstrap.ps1))) doctor
 ```
 
-Or download `madlyx.exe` from [Releases](https://github.com/Neur0nz/MadLyXInstaller/releases)
-and run it directly.
+## Safe to run twice
 
----
+Every step checks whether its work is already done, so re-running skips whatever
+is finished. If it stops halfway — lost connection, closed window — just run it
+again and it carries on.
 
-## What it does
-
-**Installs** MiKTeX (chosen because it downloads missing packages on demand,
-which removes the guide's entire "installing new packages" chapter, pp. 17–19),
-LyX, the Hebrew and maths LaTeX packages, and Culmus support including the
-MiKTeX font-map registration that the guide spends two pages on (pp. 23–24).
-
-**Configures LyX** — every key verified against LyX's own `LyXRC.cpp` tag table
-rather than recalled:
-
-| Setting | Why | Source |
-|---|---|---|
-| `\gui_language english` | Every guide and forum answer is in English; menu keyboard navigation needs it | p. 14 |
-| `\kbmap` + `null` / `hebrew` | Hebrew comes from LyX, not Windows | fig. 0.4 |
-| `\visual_cursor true` | Arrow keys behave correctly in RTL text | fig. 0.3 |
-| `\scroll_below_document true` | Scroll past the end of the document | fig. 0.5 |
-| `\bind_file "cua"` | Keeps Ctrl+S / Ctrl+M working alongside the MadLyX shortcuts | pp. 75–77 |
-| `\path_prefix` | Lets LyX find the TeX binaries | — |
-| `\preview on` | Renders maths and images inline in the editor | *added* |
-| `\autosave` + `\make_backup` | Crash protection | *added* |
-| `\set_color` × 6 | Muted editor colours; 2.4's defaults are unreadable | p. 46 |
-
-**Installs the MadLyX payload** — the ~500-shortcut bind file matched to your
-LyX version, the five templates (wired into `Ctrl+Shift+N`), the macro files,
-and a shared preamble collecting the guide's LaTeX fixes.
-
-**Offers, asking first** — Defender exclusions for the TeX tree, which speed up
-compiling noticeably. This is the only part that needs administrator rights, so
-it is opt-in via `--elevate`.
-
-> **No permission prompts.** MiKTeX and LyX are both installed for the current
-> user, so a normal run never shows a UAC dialog. LyX's installer supports this
-> through its `/CurrentUser` switch; it lands in `%LOCALAPPDATA%\Programs\LyX 2.4`
-> and writes only to `HKCU`. If that path fails on some machine the installer
-> retries the ordinary machine-wide install, which may ask for permission.
-
-> The installer does **not** touch your Windows keyboard shortcuts. The guide
-> advises keeping Windows on ENG *while typing in LyX* (p. 17), since LyX
-> supplies the Hebrew itself via F12 — but Alt+Shift is how you switch language
-> everywhere else, and disabling it system-wide would be a bad trade.
-
-**Verifies** by compiling a bundled Hebrew document to PDF. On failure it maps
-the error onto the guide's documented fix rather than saying "something went
-wrong".
-
----
-
-## Commands
-
-```
-madlyx                 install and configure everything
-madlyx doctor          check the installation; changes nothing
-madlyx uninstall       restore settings from backup, undo system changes
-```
-
-| Flag | Effect |
-|---|---|
-| `--dry-run` | Report what would change, change nothing |
-| `--yes` / `-y` | Never ask; system changes are **skipped**, not assumed |
-| `--tex miktex\|texlive\|auto` | Override the distribution choice |
-| `--skip-test` | Skip the final Hebrew test compile |
-| `--skip-system` | LyX and TeX only; nothing outside them |
-| `--elevate` | Restart with administrator rights, enabling the Defender exclusions. Not needed otherwise: LyX and MiKTeX both install for the current user, so a normal run never asks for permission |
-
-## Safe to re-run
-
-Each step reports whether its work is already done, so a second run applies only
-what's outstanding. If a run is interrupted, running it again **resumes** rather
-than starting over.
-
-Settings live in a marked block:
+Already have LyX? It uses the one you have and only adds the MadLyX
+configuration. Your existing preferences are backed up first, and only the
+settings MadLyX manages are touched; anything you chose yourself is left alone.
+Your settings live inside a marked block:
 
 ```
 ### BEGIN MadLyXInstaller - do not edit inside this block
@@ -99,99 +140,56 @@ Settings live in a marked block:
 ### END MadLyXInstaller
 ```
 
-Re-running replaces that block and strips stray copies of the keys it manages.
-Settings you chose yourself are left alone. `preferences` and `user.bind` are
-backed up before any change, and a backup never overwrites another backup.
-
-## Versions
-
-| | |
-|---|---|
-| **LyX** | 2.4.4.1 via winget, Chocolatey as fallback |
-| **TeX** | MiKTeX, with TeX Live when the profile path contains Hebrew |
-
-**If LyX is already installed it is left alone** and the installer adapts:
-2.3 gets the Format 4 bind file and no colour overrides; 2.4 and later get
-Format 5 and muted colours. LyX 2.5 has no dedicated MadLyX build, so it gets
-the 2.4 file — safe, because LyX converts a mismatched bind format on load
-(`KeyMap::read` in the LyX source). An existing TeX distribution is always
-reused; a second one is never installed.
+One thing to know: if you have customised your own LyX keyboard shortcuts, the
+MadLyX shortcut file **replaces** them. The old one is backed up beside it, and
+`uninstall` puts it back.
 
 ---
 
-## After installing
+## Credits
 
-- **F12** switches between Hebrew and English *inside LyX*
-- **Keep Windows itself on ENG** — LyX supplies the Hebrew
-- **Ctrl+Shift+N** starts a document from a MadLyX template
-- **Check the shortcuts loaded**: in a maths box, `Alt+W` then `A` gives α
-- **Keep Hebrew out of folder names** anywhere above your documents
+The setup, the shortcut file, the macros and the templates are all **Kali's**
+work, from *The MadLyX*. This repository only installs them.
+See [CREDITS.md](CREDITS.md).
 
-To use the macros: `Insert > File > Child Document`, pick a file from
-`Documents\MadLyX\macros`, set the include type to **Input**, and set the
-resulting box to `Standard` layout — not a heading, or you get a blank first
-page (p. 41).
+## Known limitations
 
----
+- **Windows only.**
+- **Hebrew usernames cannot be fixed** — see above.
+- **TeX Live must be installed manually.** MiKTeX is the supported automatic
+  path.
+- **`kalikton.py` / `kalilmod.py` are not included.** They need Python, which
+  this installer deliberately avoids.
+- **LuaLaTeX / fontspec is not supported.** Better typography, but slower, and
+  Kali's templates and macros do not port to it.
 
-## Building
+## For developers
 
-```bash
-cp -r payload go/internal/payload/data   # go:embed cannot reach outside its package
-cd go && go test ./... && go build -o madlyx.exe ./cmd/madlyx
+Written in Go, shipped as a single executable with everything embedded, so
+there is nothing to install first. The installer is a table of steps, each with
+a `Check` that asks the machine what is already true and an `Apply` that does
+the work — which is what makes the dry run, the resume-after-failure and
+`doctor` all fall out of the same definitions.
+
+```
+bootstrap.ps1              the one-liner: downloads the release and runs it
+payload/                   Kali's files, shipped byte-for-byte unmodified
+go/cmd/madlyx              command line
+go/internal/steps          what the installer does, as data
+go/internal/step           the engine: checks, apply, rollback, scheduling
+go/internal/ui             the only code that writes to the terminal
 ```
 
-Go is a **build-time dependency only**. The released binary imports nothing but
-Windows system DLLs and runs on a machine with an empty `PATH`.
+Build it yourself:
 
-### Layout
+```bash
+cp -r payload go/internal/payload/data
+cd go && go build -o madlyx.exe ./cmd/madlyx
+```
 
-| | |
-|---|---|
-| `internal/ui` | The only code that prints. Detects the terminal once and degrades to plain lines when piped |
-| `internal/step` | The engine. Steps are data with a `Check`/`Apply`/`Undo`; dry-run, resume, rollback and the doctor all derive from that |
-| `internal/steps` | What the installer actually does |
-| `internal/lyxcfg` | Idempotent preferences writer, collision-proof backups |
-| `internal/winenv` | LyX and TeX discovery |
-| `internal/winsys` | Registry, Defender, elevation |
-| `internal/pkgmgr` | winget / Chocolatey / mpm behind a testable interface |
-| `internal/payload` | Kali's files, compiled in |
-
-`doctor` is `Plan.Diagnose` over the same `Check` functions the installer uses,
-so the two cannot drift about what "configured" means.
-
-### Verifying a release
+Releases are built by GitHub Actions and carry
+[build provenance](https://github.com/Neur0nz/MadLyXInstaller/attestations):
 
 ```bash
 gh attestation verify madlyx.exe --repo Neur0nz/MadLyXInstaller
 ```
-
-Releases carry [SLSA build provenance](https://docs.github.com/en/actions/concepts/security/artifact-attestations),
-so the binary is verifiably built by the release workflow from a specific commit.
-
----
-
-## Known limitations
-
-- **Windows only.** The guide points macOS users to
-  [Sraya's guide](https://srayaa.wixsite.com/math/various).
-- **`hyperref` is left commented out** in the shared preamble — it gives
-  clickable cross-references, but the guide reports it erroring in the
-  `heb-article` class (p. 53). Enable it per-document in the Standard templates.
-- **Hebrew usernames cannot be fixed.** Windows has no supported way to rename a
-  user profile folder. The installer switches to TeX Live, which copes better,
-  and warns. The real fix is an account with an English name.
-- **TeX Live must be installed manually** — MiKTeX is the supported automatic
-  path.
-- **`kalikton.py` / `kalilmod.py` are not included**; they need Python, which
-  this installer deliberately avoids. The better-engineered approach for that
-  kind of task is driving LyX itself via `lyx -x "<LFUN>"`
-  ([LyX wiki](https://wiki.lyx.org/LyX/LyxFunctions)).
-- **LuaLaTeX / fontspec is not supported.** Better typography, but slower, and
-  Kali's templates and macros do not port to it.
-
-## Credits
-
-The entire setup, the shortcut file, the macros and the templates are **Kali's**
-work, from *The MadLyX*. This repository is an installer for it.
-See [CREDITS.md](CREDITS.md).
