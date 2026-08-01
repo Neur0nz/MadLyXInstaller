@@ -1,6 +1,8 @@
 package steps
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -175,3 +177,59 @@ func TestLyXSeriesIsReadFromTheInstallerName(t *testing.T) {
 		}
 	}
 }
+
+// The second call - with the directory LyX really landed in - must cost nothing
+// when the prediction was right. If it re-downloaded, every install would fetch
+// 7.8 MB twice.
+func TestHebrewDictionaryIsNotFetchedTwice(t *testing.T) {
+	root := t.TempDir()
+	dicts := filepath.Join(root, "Resources", "dicts")
+	if err := os.MkdirAll(dicts, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name := range hebrewDictURLs {
+		if err := os.WriteFile(filepath.Join(dicts, name), []byte("already here"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// No network is reachable in this test; if it tried to download, the files
+	// would be replaced or removed.
+	placeHebrewDictionary(&step.Context{UI: quietUI{}, Log: quietLog{}}, root)
+
+	for name := range hebrewDictURLs {
+		b, err := os.ReadFile(filepath.Join(dicts, name))
+		if err != nil {
+			t.Fatalf("%s was removed: %v", name, err)
+		}
+		if string(b) != "already here" {
+			t.Errorf("%s was re-downloaded over an existing file", name)
+		}
+	}
+}
+
+// An empty root must be ignored rather than writing into the current directory.
+func TestHebrewDictionaryIgnoresAnUnknownRoot(t *testing.T) {
+	placeHebrewDictionary(&step.Context{UI: quietUI{}, Log: quietLog{}}, "")
+}
+
+type quietLog struct{}
+
+func (quietLog) Logf(string, ...any) {}
+
+type quietUI struct{}
+
+func (quietUI) Section(string)                       {}
+func (quietUI) Begin(string)                         {}
+func (quietUI) End(string, bool, string)             {}
+func (quietUI) Detail(string)                        {}
+func (quietUI) Progress(string, int, int)            {}
+func (quietUI) DetailFor(string, string)             {}
+func (quietUI) ProgressFor(string, string, int, int) {}
+func (quietUI) Overall(int, int)                     {}
+func (quietUI) Drop(string)                          {}
+func (quietUI) Skipped(string, ...any)               {}
+func (quietUI) Warn(string, ...any)                  {}
+func (quietUI) Info(string, ...any)                  {}
+func (quietUI) Confirm(string, string, bool) bool    { return false }
+func (quietUI) CanPrompt() bool                      { return false }

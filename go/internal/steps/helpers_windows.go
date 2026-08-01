@@ -137,11 +137,25 @@ var hebrewDictURLs = map[string]string{
 //
 // Failure here is not fatal: the worst case is the dialogs LyX would have shown
 // anyway.
-func placeHebrewDictionary(c *step.Context, installerName string) {
-	dir := filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs",
-		"LyX "+lyxSeriesFromInstaller(installerName), "Resources", "dicts")
+//
+// It is called twice, with the two directories that can be right. Before the
+// install, with the one the per-user path is about to use - predicted, because
+// the files have to exist before the installer looks. After the install, with
+// the directory LyX actually landed in, which closes the case where the
+// per-user attempt failed and the machine-wide fallback put LyX somewhere else:
+// the prediction would have seeded an empty folder and the real installation
+// would have no dictionary. The second call costs nothing when the prediction
+// was right, because files already present are skipped.
+func placeHebrewDictionary(c *step.Context, lyxRoot string) {
+	if lyxRoot == "" {
+		return
+	}
+	dir := filepath.Join(lyxRoot, "Resources", "dicts")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		c.Log.Logf("hebrew dictionary: %v", err)
+		// Program Files is not writable without administrator rights, which is
+		// expected on the machine-wide fallback; nothing here is worth failing
+		// the install over.
+		c.Log.Logf("hebrew dictionary (%s): %v", dir, err)
 		return
 	}
 
@@ -162,6 +176,17 @@ func placeHebrewDictionary(c *step.Context, installerName string) {
 		}
 		c.Log.Logf("placed %s", dest)
 	}
+}
+
+// predictedLyXRoot is where the per-user install is about to put LyX.
+//
+// The dictionary has to be in place before the installer runs, so this is the
+// one thing that cannot wait to be discovered. It mirrors the installer's own
+// default: MULTIUSER_INSTALLMODE_INSTDIR is "LyX <major>.<minor>", under
+// %LOCALAPPDATA%\Programs in /CurrentUser mode.
+func predictedLyXRoot(installerName string) string {
+	return filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs",
+		"LyX "+lyxSeriesFromInstaller(installerName))
 }
 
 // lyxSeriesFromInstaller reads "2.4" out of "LyX_2.4.4.1_X64_nullsoft_en-US.exe".

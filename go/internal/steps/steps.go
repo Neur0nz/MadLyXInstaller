@@ -229,7 +229,7 @@ func lyxInstall(o Options) *step.Step {
 					// Before the installer runs, not after: it only skips its own
 					// (404ing) download when the files are already there.
 					c.UI.Detail("fetching the Hebrew spell-check dictionary")
-					placeHebrewDictionary(c, filepath.Base(installer))
+					placeHebrewDictionary(c, predictedLyXRoot(filepath.Base(installer)))
 
 					c.UI.Detail("running the LyX installer")
 					if _, rerr := o.Runner.RunWith(ctx,
@@ -247,6 +247,9 @@ func lyxInstall(o Options) *step.Step {
 			c.UI.Detail("waiting for the installation to settle")
 			if l, ok := winenv.WaitFor(3*time.Minute, 2*time.Second, winenv.FindLyX); ok {
 				c.Set(keyLyX, l)
+				// No-op when the prediction was right; the real fix when it was
+				// not, because only now is the directory known rather than guessed.
+				placeHebrewDictionary(c, l.Root)
 				return nil
 			}
 
@@ -261,6 +264,7 @@ func lyxInstall(o Options) *step.Step {
 			}
 			if l, ok := winenv.WaitFor(3*time.Minute, 2*time.Second, winenv.FindLyX); ok {
 				c.Set(keyLyX, l)
+				placeHebrewDictionary(c, l.Root)
 				return nil
 			}
 
