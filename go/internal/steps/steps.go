@@ -167,7 +167,23 @@ func lyxInstall(o Options) *step.Step {
 			// warm MiKTeX. Without saying so, a motionless line here reads as a
 			// hang, which is exactly what it was mistaken for.
 			progress := func(phase string) { c.UI.Detail(phase) }
-			c.UI.Detail("installing LyX, then letting it scan your new TeX setup (several minutes)")
+			c.UI.Detail("installing LyX")
+
+			// Silence MiKTeX's on-demand installer while LyX configures itself.
+			// See SetMiKTeXAutoInstall: leaving it on is what made this step take
+			// eight and a half minutes. Restored immediately afterwards, and the
+			// reconfigure step re-runs LyX's scan with it back on.
+			if t, ok := step.Get[winenv.TeX](c, keyTeX); ok && t.Distro == "miktex" {
+				if err := pkgmgr.SetMiKTeXAutoInstall(ctx, o.Runner, t.BinDir, false); err != nil {
+					c.Log.Logf("could not pause MiKTeX auto-install: %v", err)
+				} else {
+					defer func() {
+						if err := pkgmgr.SetMiKTeXAutoInstall(context.Background(), o.Runner, t.BinDir, true); err != nil {
+							c.UI.Warn("could not re-enable MiKTeX auto-install: %v", err)
+						}
+					}()
+				}
+			}
 
 			// Install for this user only, which needs no administrator rights.
 			//

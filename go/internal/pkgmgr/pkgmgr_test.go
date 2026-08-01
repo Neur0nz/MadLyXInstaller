@@ -235,3 +235,21 @@ func TestWarmMiKTeXBuildsBothCachesAndSurvivesFailure(t *testing.T) {
 		t.Errorf("expected both caches to be attempted, got %d calls", len(r.calls))
 	}
 }
+
+// Auto-install has to be switchable, because leaving it on during the LyX
+// install is what made that step take eight and a half minutes.
+func TestAutoInstallCanBePausedAndRestored(t *testing.T) {
+	r := &fakeRunner{}
+	if err := SetMiKTeXAutoInstall(context.Background(), r, `C:\bin`, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnableMiKTeXAutoInstall(context.Background(), r, `C:\bin`); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(r.calls[0], " "); !strings.Contains(got, "[MPM]AutoInstall=0") {
+		t.Errorf("pause did not set 0: %s", got)
+	}
+	if got := strings.Join(r.calls[1], " "); !strings.Contains(got, "[MPM]AutoInstall=1") {
+		t.Errorf("restore did not set 1: %s", got)
+	}
+}

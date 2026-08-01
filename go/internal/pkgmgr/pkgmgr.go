@@ -334,7 +334,27 @@ func InstallTeXPackages(ctx context.Context, r Runner, distro, binDir string,
 // which is the whole reason MiKTeX is preferred over TeX Live here: it removes
 // the guide's entire "installing new packages" chapter.
 func EnableMiKTeXAutoInstall(ctx context.Context, r Runner, binDir string) error {
-	_, err := r.Run(ctx, binDir+`\initexmf.exe`, "--set-config-value", "[MPM]AutoInstall=1")
+	return SetMiKTeXAutoInstall(ctx, r, binDir, true)
+}
+
+// SetMiKTeXAutoInstall turns on-demand package installation on or off.
+//
+// It has to be switchable because leaving it on makes installing LyX roughly
+// seven minutes slower. LyX's configure runs latex ~122 times to test which
+// document classes work; with AutoInstall on, every one of those runs that
+// touches something missing sends MiKTeX off to resolve it, and miktex.log
+// shows the result - latex is the parent of 122 of the 130 miktex-fc-cache
+// invocations, each taking about three and a half seconds.
+//
+// Turning it off for the duration of the LyX install costs nothing: LyX's own
+// verdict about document classes is recomputed afterwards by the reconfigure
+// step, which runs with it back on.
+func SetMiKTeXAutoInstall(ctx context.Context, r Runner, binDir string, on bool) error {
+	value := "0"
+	if on {
+		value = "1"
+	}
+	_, err := r.Run(ctx, binDir+`\initexmf.exe`, "--set-config-value", "[MPM]AutoInstall="+value)
 	return err
 }
 
